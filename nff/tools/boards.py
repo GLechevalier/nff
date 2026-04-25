@@ -70,3 +70,21 @@ def find_device(port: str | None = None) -> DetectedDevice | None:
         if port is None or device.port == port:
             return device
     return None
+
+
+if __name__ == "__main__":
+    import serial.tools.list_ports as lp
+
+    print("=== All USB/serial ports ===")
+    for p in lp.comports():
+        vid = _normalize_id(p.vid)
+        pid = _normalize_id(p.pid)
+        print(f"  {p.device}  vid={vid or 'n/a'}  pid={pid or 'n/a'}  desc={p.description}")
+
+    print("\n=== Recognised boards ===")
+    devices = list_devices()
+    if devices:
+        for d in devices:
+            print(f"  {d.board} on {d.port}  (fqbn={d.fqbn}, vid={d.vendor_id}, pid={d.product_id})")
+    else:
+        print("  No recognised boards found.")
