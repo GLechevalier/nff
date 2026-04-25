@@ -18,6 +18,8 @@ from rich.console import Console
 
 from nff import config as cfg_module
 from nff.tools import boards as boards_module
+from nff.tools import toolchain
+from nff.tools import installer
 from nff.tools.boards import DetectedDevice
 
 if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
@@ -32,6 +34,29 @@ _MCP_ENTRY: dict = {"command": "nff", "args": ["mcp"]}
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _ensure_arduino_cli() -> None:
+    """Install arduino-cli silently if it is not already on PATH."""
+    if toolchain.find_arduino_cli():
+        return
+    console.print(
+        "  [yellow]⚠[/yellow]  arduino-cli not found — installing automatically…"
+    )
+    try:
+        exe = installer.install(force=False)
+        if installer.verify(exe):
+            console.print("  [bold green]✓[/bold green] arduino-cli installed.")
+        else:
+            console.print(
+                "  [yellow]⚠[/yellow]  arduino-cli installed but could not be verified. "
+                "Restart your terminal if commands fail."
+            )
+    except Exception as exc:
+        console.print(
+            f"  [yellow]⚠[/yellow]  Could not auto-install arduino-cli: {exc}\n"
+            "  Install manually: https://arduino.github.io/arduino-cli"
+        )
+
 
 def _pick_device(devices: list[DetectedDevice]) -> DetectedDevice:
     """Return the chosen device; prompts when more than one is connected."""
@@ -86,6 +111,7 @@ def _update_claude_desktop_config() -> None:
               help="Overwrite an existing config without prompting.")
 def init(port: str | None, baud: int, force: bool) -> None:
     """Detect a connected board, write config, and register the MCP server."""
+    _ensure_arduino_cli()
 
     # Guard against overwriting an existing, valid config
     if cfg_module.exists() and not force:

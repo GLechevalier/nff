@@ -44,6 +44,21 @@ cli.add_command(monitor)
 cli.add_command(doctor)
 
 
+@cli.command("install-deps")
+@click.option("--force", is_flag=True, help="Reinstall even if already present.")
+def install_deps(force: bool) -> None:
+    """Download and install arduino-cli (runs automatically during `nff init`)."""
+    from nff.tools import installer
+    console.print("[bold cyan]arduino-cli installer[/bold cyan]")
+    try:
+        exe = installer.install(force=force)
+        if not installer.verify(exe):
+            raise SystemExit(1)
+    except Exception as exc:
+        console.print(f"  [bold red]✗[/bold red] {exc}")
+        raise SystemExit(1)
+
+
 @cli.command()
 def mcp() -> None:
     """Start the MCP server (stdio). Called automatically by Claude Code."""
