@@ -144,23 +144,47 @@ def _run(cmd: list[str], timeout: int = 120) -> RunResult:
         raise ToolchainError(f"Command timed out after {timeout}s: {' '.join(cmd)}") from exc
 
 
-def _stream_process(cmd: list[str]) -> Iterator[str]:
-    """Run *cmd* and yield stdout+stderr lines as they arrive."""
-    try:
-        proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-        )
-    except FileNotFoundError as exc:
-        raise ToolchainError(f"Executable not found: {cmd[0]}") from exc
+class ProcessStream:
+    """Iterable subprocess stream that records the exit code after iteration.
 
-    assert proc.stdout is not None
-    for line in proc.stdout:
-        yield line.rstrip("\n")
-    proc.wait()
+    Usage::
+
+        stream = toolchain.stream_compile(sketch_dir, fqbn)
+        for line in stream:
+            print(line)
+        if stream.returncode != 0:
+            ...  # handle failure
+
+    ``returncode`` is ``None`` until the for-loop (or manual ``__iter__``)
+    is fully exhausted.
+    """
+
+    def __init__(self, cmd: list[str]) -> None:
+        self._cmd = cmd
+        self.returncode: int | None = None
+
+    def __iter__(self) -> Iterator[str]:
+        try:
+            proc = subprocess.Popen(
+                self._cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+            )
+        except FileNotFoundError as exc:
+            raise ToolchainError(f"Executable not found: {self._cmd[0]}") from exc
+
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            yield line.rstrip("\n")
+        proc.wait()
+        self.returncode = proc.returncode
+
+
+def _stream_process(cmd: list[str]) -> ProcessStream:
+    """Return a :class:`ProcessStream` for *cmd*."""
+    return ProcessStream(cmd)
 
 
 def _require_arduino_cli() -> str:
@@ -213,39 +237,41 @@ def upload_sketch(sketch_dir: pathlib.Path, fqbn: str, port: str) -> RunResult:
     return _run([exe, "upload", "--fqbn", fqbn, "--port", port, str(sketch_dir)])
 
 
-def stream_compile(sketch_dir: pathlib.Path, fqbn: str) -> Iterator[str]:
-    """Yield compile output lines in real time (for CLI display).
+def stream_compile(sketch_dir: pathlib.Path, fqbn: str) -> ProcessStream:
+    """Return a :class:`ProcessStream` for a compile run (for CLI display).
 
     Args:
         sketch_dir: Path to the sketch directory.
         fqbn: Fully-qualified board name.
 
-    Yields:
-        Output lines (stdout and stderr merged, as they arrive).
+    Returns:
+        An iterable :class:`ProcessStream`; ``returncode`` is set after
+        the iterator is exhausted.
 
     Raises:
         ToolchainError: If arduino-cli is missing or fails to start.
     """
     exe = _require_arduino_cli()
-    yield from _stream_process([exe, "compile", "--fqbn", fqbn, str(sketch_dir)])
+    return _stream_process([exe, "compile", "--fqbn", fqbn, str(sketch_dir)])
 
 
-def stream_upload(sketch_dir: pathlib.Path, fqbn: str, port: str) -> Iterator[str]:
-    """Yield upload output lines in real time (for CLI display).
+def stream_upload(sketch_dir: pathlib.Path, fqbn: str, port: str) -> ProcessStream:
+    """Return a :class:`ProcessStream` for an upload run (for CLI display).
 
     Args:
         sketch_dir: Path to the sketch directory.
         fqbn: Fully-qualified board name.
         port: Serial port.
 
-    Yields:
-        Output lines.
+    Returns:
+        An iterable :class:`ProcessStream`; ``returncode`` is set after
+        the iterator is exhausted.
 
     Raises:
         ToolchainError: If arduino-cli is missing or fails to start.
     """
     exe = _require_arduino_cli()
-    yield from _stream_process(
+    return _stream_process(
         [exe, "upload", "--fqbn", fqbn, "--port", port, str(sketch_dir)]
     )
 
