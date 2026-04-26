@@ -40,9 +40,27 @@ class RunResult:
 # Tool discovery
 # ---------------------------------------------------------------------------
 
+def _arduino_cli_fallback_path() -> pathlib.Path | None:
+    """Return the known installer location for arduino-cli, or None."""
+    import os
+    import platform
+    if platform.system() == "Windows":
+        base = pathlib.Path(
+            os.environ.get("LOCALAPPDATA", pathlib.Path.home() / "AppData" / "Local")
+        )
+        candidate = base / "Programs" / "arduino-cli" / "arduino-cli.exe"
+        return candidate if candidate.exists() else None
+    candidate = pathlib.Path.home() / ".local" / "bin" / "arduino-cli"
+    return candidate if candidate.exists() else None
+
+
 def find_arduino_cli() -> str | None:
-    """Return the absolute path to arduino-cli, or None if not in PATH."""
-    return shutil.which("arduino-cli")
+    """Return the absolute path to arduino-cli, or None if not found."""
+    found = shutil.which("arduino-cli")
+    if found:
+        return found
+    fallback = _arduino_cli_fallback_path()
+    return str(fallback) if fallback else None
 
 
 def find_esptool() -> str | None:
