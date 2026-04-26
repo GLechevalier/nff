@@ -200,22 +200,39 @@ Always use nff MCP tools for hardware interaction.
 Never use arduino-cli, esptool, or pyserial directly.
 
 ## Connected Device
-- Board: {board}
-- Port: {port}
-- Mode: {mode}
+- Board  : {board}
+- Port   : {port}
+- FQBN   : {fqbn}
+- Wokwi  : {wokwi_chip}
 
-## Workflow
-1. list_devices() — verify connection
-2. flash(code) — compile + upload
-3. serial_read(3000) — check output
-4. Iterate this way, Claude knows that it has to call nff to write to my esp32
+## Workflow — Real Hardware
+1. list_devices()         — verify the board is connected
+2. flash(code)            — compile + upload sketch
+3. serial_read(3000)      — capture output
+4. Iterate
+
+## Workflow — Wokwi Simulation (no hardware required)
+1. wokwi_flash(code)      — compile + simulate, returns dict with serial_output
+2. Inspect serial_output  — no board or USB cable needed
+3. Iterate with wokwi_flash until output is correct
+4. flash(code)            — upload to real hardware when ready
+
+## Extending the Wokwi circuit
+- wokwi_get_diagram(board) — get a minimal diagram.json stub as a JSON string
+- Edit the JSON to add components (LEDs, sensors, resistors) and connections
+- Pass the edited diagram to wokwi_flash via the diagram parameter (future)
 """
 
 
-def _write_claude_md(port: str, board: str, fqbn: str) -> None:
+def _write_claude_md(port: str, board: str, fqbn: str, wokwi_chip: str | None) -> None:
     """Write CLAUDE.md into the current working directory."""
     dest = Path.cwd() / "CLAUDE.md"
-    content = _CLAUDE_MD_TEMPLATE.format(board=board, port=port, mode=fqbn or "unknown")
+    content = _CLAUDE_MD_TEMPLATE.format(
+        board=board,
+        port=port,
+        fqbn=fqbn or "unknown",
+        wokwi_chip=wokwi_chip or "not supported",
+    )
     dest.write_text(content, encoding="utf-8")
     console.print(
         f"  [bold green]✓[/bold green] CLAUDE.md written to [bold]{dest}[/bold]"
@@ -225,10 +242,16 @@ def _write_claude_md(port: str, board: str, fqbn: str) -> None:
 def _write_success(port: str, board: str, device: DetectedDevice | None) -> None:
     """Print the success lines and update the Claude Desktop config."""
     if device:
+        wokwi_note = (
+            f"  [dim cyan]sim: {device.wokwi_chip}[/dim cyan]"
+            if device.wokwi_chip
+            else "  [dim]no Wokwi support[/dim]"
+        )
         console.print(
             f"  [bold green]✓[/bold green] Found: [bold]{device.board}[/bold] "
             f"on {device.port} "
             f"(vendor: {device.vendor_id}, product: {device.product_id})"
+            f"{wokwi_note}"
         )
 
     console.print(
@@ -239,7 +262,8 @@ def _write_success(port: str, board: str, device: DetectedDevice | None) -> None
     # Write CLAUDE.md in cwd
     try:
         fqbn = device.fqbn if device else ""
-        _write_claude_md(port=port, board=board, fqbn=fqbn)
+        wokwi_chip = device.wokwi_chip if device else None
+        _write_claude_md(port=port, board=board, fqbn=fqbn, wokwi_chip=wokwi_chip)
     except OSError as exc:
         console.print(f"  [yellow]⚠[/yellow]  Could not write CLAUDE.md: {exc}")
 
