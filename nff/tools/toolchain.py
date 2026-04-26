@@ -68,6 +68,11 @@ def find_esptool() -> str | None:
     return shutil.which("esptool.py") or shutil.which("esptool")
 
 
+def find_wokwi_cli() -> str | None:
+    """Return the absolute path to wokwi-cli, or None if not found."""
+    return shutil.which("wokwi-cli")
+
+
 def arduino_cli_version() -> str | None:
     """Return the arduino-cli version string, or None if not installed."""
     exe = find_arduino_cli()
@@ -76,6 +81,23 @@ def arduino_cli_version() -> str | None:
     try:
         result = subprocess.run(
             [exe, "version"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        return result.stdout.strip() or result.stderr.strip() or None
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def wokwi_cli_version() -> str | None:
+    """Return the wokwi-cli version string, or None if not installed."""
+    exe = find_wokwi_cli()
+    if exe is None:
+        return None
+    try:
+        result = subprocess.run(
+            [exe, "--version"],
             capture_output=True,
             text=True,
             timeout=10,
@@ -136,6 +158,61 @@ def write_sketch(
     target.mkdir(parents=True, exist_ok=True)
     (target / f"{target.name}.ino").write_text(code, encoding="utf-8")
     return target
+
+
+def elf_path_for(sketch_dir: pathlib.Path, fqbn: str) -> pathlib.Path:
+    """Return the ELF output path that arduino-cli writes after compilation.
+
+    arduino-cli places build artefacts under
+    ``<sketch_dir>/build/<fqbn_with_dots>/<sketch_name>.elf``.
+    Colons in the FQBN are replaced by dots to form a valid directory name.
+
+    Args:
+        sketch_dir: Root of the sketch directory (same value passed to
+            :func:`write_sketch`).
+        fqbn: Fully-qualified board name, e.g. ``arduino:avr:uno``.
+
+    Returns:
+        Absolute :class:`~pathlib.Path` to the expected ELF file.
+        The file may not exist if compilation has not been run yet.
+    """
+    fqbn_dir = fqbn.replace(":", ".")
+    return sketch_dir / "build" / fqbn_dir / f"{sketch_dir.name}.elf"
+
+
+def compile(
+    code: str,
+    fqbn: str,
+    sketch_dir: pathlib.Path | None = None,
+) -> tuple[str, pathlib.Path]:
+    """Write *code* to a sketch, compile it, and return the ELF path.
+
+    Unlike :func:`flash`, this function does **not** upload to a device.
+    It is the entry point for the Wokwi simulation flow:
+    ``wokwi_flash`` calls this to obtain the compiled ELF binary, then
+    passes it to ``WokwiRunner`` for simulation.
+
+    Args:
+        code: Full Arduino / C++ sketch source.
+        fqbn: Fully-qualified board name, e.g. ``arduino:avr:uno``.
+        sketch_dir: Override the default temp sketch directory.
+
+    Returns:
+        A ``(compile_output, elf_path)`` tuple where *compile_output* is the
+        combined stdout/stderr from arduino-cli and *elf_path* is the absolute
+        path to the compiled ELF file.
+
+    Raises:
+        ToolchainError: If arduino-cli is missing, fails to start, or the
+            compilation exits with a non-zero code.
+    """
+    target_dir = write_sketch(code, sketch_dir)
+    result = compile_sketch(target_dir, fqbn)
+    if not result.success:
+        raise ToolchainError(
+            f"Compile failed (exit {result.returncode}):\n{result.output}"
+        )
+    return result.output, elf_path_for(target_dir, fqbn)
 
 
 # ---------------------------------------------------------------------------
@@ -411,4 +488,6 @@ if __name__ == "__main__":
     print(f"arduino-cli : {_acli or 'NOT FOUND'}")
     _esp = esptool_version()
     print(f"esptool     : {_esp or 'NOT FOUND'}")
+    _wokwi = wokwi_cli_version()
+    print(f"wokwi-cli   : {_wokwi or 'NOT FOUND'}")
     print(f"sketch dir  : {_SKETCH_DIR}")
