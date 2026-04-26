@@ -9,14 +9,16 @@ import serial.tools.list_ports
 from serial.tools.list_ports_common import ListPortInfo
 
 # Maps (vendor_id, product_id) hex strings (lower-case) to board metadata.
-BOARD_MAP: dict[tuple[str, str], dict[str, str]] = {
-    ("2341", "0043"): {"name": "Arduino Uno",      "fqbn": "arduino:avr:uno"},
-    ("2341", "0010"): {"name": "Arduino Mega 2560", "fqbn": "arduino:avr:mega"},
-    ("2341", "0036"): {"name": "Arduino Leonardo",  "fqbn": "arduino:avr:leonardo"},
-    ("2341", "0058"): {"name": "Arduino Nano",      "fqbn": "arduino:avr:nano"},
-    ("10c4", "ea60"): {"name": "ESP32 (CP210x)",    "fqbn": "esp32:esp32:esp32"},
-    ("1a86", "7523"): {"name": "ESP32 (CH340)",     "fqbn": "esp32:esp32:esp32"},
-    ("0403", "6001"): {"name": "ESP8266 (FTDI)",    "fqbn": "esp8266:esp8266:generic"},
+# wokwi_chip is the Wokwi simulator chip ID for the board, or None if not
+# supported by the Wokwi simulator.
+BOARD_MAP: dict[tuple[str, str], dict[str, str | None]] = {
+    ("2341", "0043"): {"name": "Arduino Uno",      "fqbn": "arduino:avr:uno",         "wokwi_chip": "wokwi-arduino-uno"},
+    ("2341", "0010"): {"name": "Arduino Mega 2560", "fqbn": "arduino:avr:mega",        "wokwi_chip": "wokwi-arduino-mega"},
+    ("2341", "0036"): {"name": "Arduino Leonardo",  "fqbn": "arduino:avr:leonardo",    "wokwi_chip": "wokwi-arduino-leonardo"},
+    ("2341", "0058"): {"name": "Arduino Nano",      "fqbn": "arduino:avr:nano",        "wokwi_chip": "wokwi-arduino-nano"},
+    ("10c4", "ea60"): {"name": "ESP32 (CP210x)",    "fqbn": "esp32:esp32:esp32",       "wokwi_chip": "wokwi-esp32-devkit-v1"},
+    ("1a86", "7523"): {"name": "ESP32 (CH340)",     "fqbn": "esp32:esp32:esp32",       "wokwi_chip": "wokwi-esp32-devkit-v1"},
+    ("0403", "6001"): {"name": "ESP8266 (FTDI)",    "fqbn": "esp8266:esp8266:generic", "wokwi_chip": "wokwi-esp8266"},
 }
 
 
@@ -27,6 +29,7 @@ class DetectedDevice:
     fqbn: str
     vendor_id: str
     product_id: str
+    wokwi_chip: str | None = None
 
 
 def _normalize_id(raw: int | str | None) -> str:
@@ -51,6 +54,7 @@ def _identify(port_info: ListPortInfo) -> DetectedDevice | None:
         fqbn=meta["fqbn"],
         vendor_id=vid,
         product_id=pid,
+        wokwi_chip=meta.get("wokwi_chip"),
     )
 
 
@@ -85,6 +89,7 @@ if __name__ == "__main__":
     devices = list_devices()
     if devices:
         for d in devices:
-            print(f"  {d.board} on {d.port}  (fqbn={d.fqbn}, vid={d.vendor_id}, pid={d.product_id})")
+            sim = d.wokwi_chip or "no Wokwi support"
+            print(f"  {d.board} on {d.port}  (fqbn={d.fqbn}, vid={d.vendor_id}, pid={d.product_id}, sim={sim})")
     else:
         print("  No recognised boards found.")

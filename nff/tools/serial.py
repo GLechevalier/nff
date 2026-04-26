@@ -1,10 +1,14 @@
-"""pyserial read/write/capture helpers.
-  ┌──────────────────────────────────────┬───────────────────────────────────────────────────────────────────────────────┐                                
+"""pyserial read/write/capture helpers — physical hardware only.
+
+All functions in this module communicate over a real USB/serial port.
+For simulated hardware use nff.tools.wokwi (wokwi_flash / wokwi_serial_read).
+
+  ┌──────────────────────────────────────┬───────────────────────────────────────────────────────────────────────────────┐
   │               Function               │                                    Purpose                                    │
-  ├──────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────┤                                
-  │ serial_read(duration_ms, port, baud) │ Capture all incoming bytes for duration_ms ms, return as decoded string       │                              
-  ├──────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────┤                              
-  │ serial_write(data, port, baud)       │ Send a string (appends \n if absent), return byte-count confirmation          │
+  ├──────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────┤
+  │ serial_read(duration_ms, port, baud) │ Capture all incoming bytes for duration_ms ms, return as decoded string       │
+  ├──────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────┤
+  │ serial_write(data, port, baud)       │ Send a string (appends \\n if absent), return byte-count confirmation         │
   ├──────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────┤
   │ reset_device(port)                   │ Toggle DTR low→high to hardware-reset the board                               │
   ├──────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────┤
@@ -119,6 +123,11 @@ def serial_read(
         Captured text decoded from the device.
         Returns ``"ERROR: <reason>"`` on failure so MCP callers can
         detect failure without exception handling.
+
+    Note:
+        Physical hardware only. For Wokwi simulation use
+        ``nff.tools.wokwi.wokwi_serial_read`` (or the ``wokwi_serial_read``
+        MCP tool).
     """
     try:
         deadline = time.monotonic() + duration_ms / 1000.0
@@ -218,6 +227,11 @@ def stream_lines(
 
     Raises:
         SerialError: If the port cannot be opened or a read error occurs.
+
+    Note:
+        Physical hardware only. Wokwi simulation output is streamed directly
+        by ``wokwi-cli`` — use ``nff wokwi run`` or the ``wokwi_flash`` MCP
+        tool instead.
     """
     deadline = (time.monotonic() + timeout_s) if timeout_s is not None else None
 
