@@ -69,8 +69,27 @@ def find_esptool() -> str | None:
 
 
 def find_wokwi_cli() -> str | None:
-    """Return the absolute path to wokwi-cli, or None if not found."""
-    return shutil.which("wokwi-cli")
+    """Return the absolute path to wokwi-cli, or None if not found.
+
+    Falls back to the nff install location so doctor/run work immediately
+    after `nff install-deps` without requiring a terminal restart.
+    """
+    found = shutil.which("wokwi-cli")
+    if found:
+        return found
+
+    # Check the location used by nff's own installer
+    import os
+    import platform as _platform
+    if _platform.system() == "Windows":
+        base = pathlib.Path(
+            os.environ.get("LOCALAPPDATA", pathlib.Path.home() / "AppData" / "Local")
+        )
+        candidate = base / "Programs" / "wokwi-cli" / "wokwi-cli.exe"
+    else:
+        candidate = pathlib.Path.home() / ".local" / "bin" / "wokwi-cli"
+
+    return str(candidate) if candidate.exists() else None
 
 
 def arduino_cli_version() -> str | None:
@@ -311,7 +330,9 @@ def compile_sketch(sketch_dir: pathlib.Path, fqbn: str) -> RunResult:
         ToolchainError: If arduino-cli is missing or fails to start.
     """
     exe = _require_arduino_cli()
-    return _run([exe, "compile", "--fqbn", fqbn, str(sketch_dir)])
+    build_path = elf_path_for(sketch_dir, fqbn).parent
+    build_path.mkdir(parents=True, exist_ok=True)
+    return _run([exe, "compile", "--fqbn", fqbn, "--build-path", str(build_path), str(sketch_dir)])
 
 
 def upload_sketch(sketch_dir: pathlib.Path, fqbn: str, port: str) -> RunResult:

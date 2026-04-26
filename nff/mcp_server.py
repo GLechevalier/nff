@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
-
-from mcp.server.fastmcp import FastMCP
-
 import json
 import tempfile
 from pathlib import Path
+from typing import Any
+
+from mcp.server.fastmcp import FastMCP
 
 from nff import config as cfg_module
 from nff.tools import boards as boards_module
@@ -61,8 +60,21 @@ def _resolve_port(port: str | None) -> str:
     raise ValueError("No port specified and no default port in config. Run `nff init`.")
 
 
+def _resolve_fqbn(board: str | None) -> str:
+    """Return FQBN from arg or config. Raises ValueError if unresolvable."""
+    if board:
+        return board
+    try:
+        fqbn = cfg_module.get_default_device().get("fqbn") or ""
+        if fqbn:
+            return fqbn
+    except cfg_module.ConfigError:
+        pass
+    raise ValueError("Missing board FQBN (pass board= or run `nff init`)")
+
+
 # ---------------------------------------------------------------------------
-# MCP Tools
+# Hardware tools
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
@@ -77,6 +89,7 @@ async def list_devices() -> dict[str, Any]:
                 "fqbn": d.fqbn,
                 "vendor_id": d.vendor_id,
                 "product_id": d.product_id,
+                "wokwi_chip": d.wokwi_chip,
             }
             for d in devices
         ]
@@ -169,7 +182,7 @@ async def get_device_info(port: str | None = None) -> dict[str, Any]:
         port: Serial port to query. Defaults to the config default device.
 
     Returns:
-        Dict with port, board, fqbn, baud, vendor_id, product_id.
+        Dict with port, board, fqbn, baud, vendor_id, product_id, wokwi_chip.
         Contains 'error' key on failure.
     """
     try:
@@ -194,6 +207,7 @@ async def get_device_info(port: str | None = None) -> dict[str, Any]:
             "baud": baud,
             "vendor_id": device.vendor_id,
             "product_id": device.product_id,
+            "wokwi_chip": device.wokwi_chip,
         }
 
     # Port is known but board isn't in BOARD_MAP — return what config has.
@@ -204,25 +218,13 @@ async def get_device_info(port: str | None = None) -> dict[str, Any]:
         "baud": baud,
         "vendor_id": "",
         "product_id": "",
+        "wokwi_chip": None,
     }
 
 
 # ---------------------------------------------------------------------------
 # Wokwi simulation tools
 # ---------------------------------------------------------------------------
-
-def _resolve_fqbn(board: str | None) -> str:
-    """Return FQBN from arg or config. Raises ValueError if unresolvable."""
-    if board:
-        return board
-    try:
-        fqbn = cfg_module.get_default_device().get("fqbn") or ""
-        if fqbn:
-            return fqbn
-    except cfg_module.ConfigError:
-        pass
-    raise ValueError("Missing board FQBN (pass board= or run `nff init`)")
-
 
 @mcp.tool()
 async def wokwi_flash(
@@ -277,7 +279,7 @@ async def wokwi_flash(
         except wokwi_module.WokwiError as exc:
             return {
                 "serial_output": "",
-                "compile_output": compile_output,
+                "compile_output": f"{compile_output}\nwokwi setup error: {exc}",
                 "exit_code": 1,
                 "simulated": True,
             }
@@ -312,7 +314,7 @@ async def wokwi_serial_read(
     """Compile and simulate a sketch, returning only the serial output.
 
     Convenience wrapper around wokwi_flash for when only serial output
-    matters and the compile details are not needed.
+    matters and compile details are not needed.
 
     Args:
         code: Full Arduino/C++ sketch source code.
