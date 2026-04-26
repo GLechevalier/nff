@@ -76,7 +76,7 @@ def _read_elf_path_from_toml(toml_path: Path) -> str | None:
 
 
 def _launch_vscode_simulation(cwd: Path) -> None:
-    """Open diagram.json as a new tab in the existing VS Code window."""
+    """Open diagram.json as a new tab and auto-start the Wokwi simulation."""
     diagram_path = cwd / _DIAGRAM_JSON
     if not diagram_path.exists():
         console.print(
@@ -92,10 +92,57 @@ def _launch_vscode_simulation(cwd: Path) -> None:
             "    In VS Code: Ctrl+Shift+P → 'Shell Command: Install code command in PATH'"
         )
         sys.exit(2)
-    console.print(
-        f"  [bold cyan]✓[/bold cyan] Opened [bold]{_DIAGRAM_JSON}[/bold] — "
-        "click the [bold]▶[/bold] button to start the simulation."
-    )
+
+    console.print(f"  [bold cyan]✓[/bold cyan] Opened [bold]{_DIAGRAM_JSON}[/bold].")
+    _trigger_wokwi_start()
+    console.print("  [bold cyan]✓[/bold cyan] Simulation started.")
+
+
+def _trigger_wokwi_start(delay_s: int = 3) -> None:
+    """Block for delay_s then send Ctrl+Shift+P → 'Wokwi: Start Simulator' to VS Code.
+
+    Runs synchronously so the process stays in the interactive desktop session —
+    detached processes lose SendKeys access on Windows.
+    """
+    console.print(f"  [dim]Waiting {delay_s} s for VS Code to load…[/dim]")
+    if sys.platform == "win32":
+        subprocess.run(
+            [
+                "powershell", "-WindowStyle", "Hidden", "-Command",
+                f"Start-Sleep -Seconds {delay_s}; "
+                "$wshell = New-Object -ComObject wscript.shell; "
+                "$wshell.AppActivate('Visual Studio Code'); "
+                "Start-Sleep -Milliseconds 500; "
+                "$wshell.SendKeys('^+p'); "
+                "Start-Sleep -Milliseconds 600; "
+                "$wshell.SendKeys('Wokwi: Start Simulator'); "
+                "Start-Sleep -Milliseconds 300; "
+                "$wshell.SendKeys('{ENTER}');",
+            ],
+            creationflags=subprocess.CREATE_NO_WINDOW,
+            check=False,
+        )
+    elif sys.platform == "darwin":
+        subprocess.run([
+            "bash", "-c",
+            f"sleep {delay_s} && osascript "
+            "-e 'tell application \"Visual Studio Code\" to activate' "
+            "-e 'tell application \"System Events\" to keystroke \"p\" "
+            "using {command down, shift down}' "
+            "-e 'delay 0.6' "
+            "-e 'tell application \"System Events\" to keystroke \"Wokwi: Start Simulator\"' "
+            "-e 'delay 0.3' "
+            "-e 'tell application \"System Events\" to key code 36'",
+        ], check=False)
+    else:
+        subprocess.run([
+            "bash", "-c",
+            f"sleep {delay_s} && "
+            "xdotool search --name 'Visual Studio Code' windowactivate --sync "
+            "key ctrl+shift+p && sleep 0.6 && "
+            "xdotool type 'Wokwi: Start Simulator' && sleep 0.3 && "
+            "xdotool key Return",
+        ], check=False)
 
 
 def _print_serial_line(line: str) -> None:
