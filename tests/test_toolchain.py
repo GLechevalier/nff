@@ -152,6 +152,7 @@ def test_find_arduino_cli_returns_path_when_found(monkeypatch):
 
 def test_find_arduino_cli_returns_none_when_absent(monkeypatch):
     monkeypatch.setattr("shutil.which", lambda name: None)
+    monkeypatch.setattr("nff.tools.toolchain._arduino_cli_fallback_path", lambda: None)
     assert find_arduino_cli() is None
 
 
