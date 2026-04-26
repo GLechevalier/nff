@@ -75,6 +75,29 @@ def _read_elf_path_from_toml(toml_path: Path) -> str | None:
     return None
 
 
+def _launch_vscode_simulation(cwd: Path) -> None:
+    """Open diagram.json as a new tab in the existing VS Code window."""
+    diagram_path = cwd / _DIAGRAM_JSON
+    if not diagram_path.exists():
+        console.print(
+            f"  [bold red]✗[/bold red] {_DIAGRAM_JSON} not found.\n"
+            "    Run [bold]nff wokwi init[/bold] to create it."
+        )
+        sys.exit(1)
+    try:
+        subprocess.Popen(["code", "--reuse-window", str(diagram_path)])
+    except FileNotFoundError:
+        console.print(
+            "  [bold red]✗[/bold red] 'code' command not found in PATH.\n"
+            "    In VS Code: Ctrl+Shift+P → 'Shell Command: Install code command in PATH'"
+        )
+        sys.exit(2)
+    console.print(
+        f"  [bold cyan]✓[/bold cyan] Opened [bold]{_DIAGRAM_JSON}[/bold] — "
+        "click the [bold]▶[/bold] button to start the simulation."
+    )
+
+
 def _print_serial_line(line: str) -> None:
     """Print one line of simulated serial output with error/warning colouring."""
     low = line.lower()
@@ -205,7 +228,9 @@ def wokwi_init(board: str | None, token: str | None, force: bool) -> None:
               type=click.Path(dir_okay=False, path_type=Path),
               metavar="FILE",
               help="Save captured serial output to FILE.")
-def wokwi_run(timeout_ms: int, serial_log: Path | None) -> None:
+@click.option("--gui", is_flag=True,
+              help="Open VS Code visual simulation instead of streaming CLI output.")
+def wokwi_run(timeout_ms: int, serial_log: Path | None, gui: bool) -> None:
     """Run the Wokwi simulation for the current project.
 
     Reads wokwi.toml from the current directory and calls wokwi-cli.
@@ -231,6 +256,10 @@ def wokwi_run(timeout_ms: int, serial_log: Path | None) -> None:
             "    Install from [bold]https://github.com/wokwi/wokwi-cli[/bold]"
         )
         sys.exit(2)
+
+    if gui:
+        _launch_vscode_simulation(cwd)
+        return
 
     # Warn if the ELF referenced in wokwi.toml doesn't exist yet
     elf_value = _read_elf_path_from_toml(toml_path)
