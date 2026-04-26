@@ -11,6 +11,8 @@ if __name__ == "__main__":
         sys.path.insert(0, _pkg_parent)
 
 import json
+import shutil
+import subprocess
 from pathlib import Path
 
 import click
@@ -73,6 +75,25 @@ def _pick_device(devices: list[DetectedDevice]) -> DetectedDevice:
         default=1,
     )
     return devices[choice - 1]
+
+
+def _register_mcp_claude_code() -> bool:
+    """Register nff with Claude Code CLI via `claude mcp add`.
+
+    Returns True on success, False if `claude` is not in PATH or the command fails.
+    """
+    if not shutil.which("claude"):
+        return False
+    try:
+        result = subprocess.run(
+            ["claude", "mcp", "add", "nff", "nff", "mcp"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        return result.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
 
 
 def _update_claude_desktop_config() -> None:
@@ -171,6 +192,36 @@ def init(port: str | None, baud: int, force: bool) -> None:
     _write_success(port=device.port, board=device.board, device=device)
 
 
+_CLAUDE_MD_TEMPLATE = """\
+# Hardware Development with nff
+
+## Rules
+Always use nff MCP tools for hardware interaction.
+Never use arduino-cli, esptool, or pyserial directly.
+
+## Connected Device
+- Board: {board}
+- Port: {port}
+- Mode: {mode}
+
+## Workflow
+1. list_devices() — verify connection
+2. flash(code) — compile + upload
+3. serial_read(3000) — check output
+4. Iterate this way, Claude knows that it has to call nff to write to my esp32
+"""
+
+
+def _write_claude_md(port: str, board: str, fqbn: str) -> None:
+    """Write CLAUDE.md into the current working directory."""
+    dest = Path.cwd() / "CLAUDE.md"
+    content = _CLAUDE_MD_TEMPLATE.format(board=board, port=port, mode=fqbn or "unknown")
+    dest.write_text(content, encoding="utf-8")
+    console.print(
+        f"  [bold green]✓[/bold green] CLAUDE.md written to [bold]{dest}[/bold]"
+    )
+
+
 def _write_success(port: str, board: str, device: DetectedDevice | None) -> None:
     """Print the success lines and update the Claude Desktop config."""
     if device:
@@ -185,10 +236,30 @@ def _write_success(port: str, board: str, device: DetectedDevice | None) -> None
         f"[bold]{cfg_module.CONFIG_PATH}[/bold]"
     )
 
+    # Write CLAUDE.md in cwd
+    try:
+        fqbn = device.fqbn if device else ""
+        _write_claude_md(port=port, board=board, fqbn=fqbn)
+    except OSError as exc:
+        console.print(f"  [yellow]⚠[/yellow]  Could not write CLAUDE.md: {exc}")
+
+    # Claude Code CLI — preferred
+    if _register_mcp_claude_code():
+        console.print(
+            "  [bold green]✓[/bold green] Registered with Claude Code CLI "
+            "([bold]claude mcp add nff nff mcp[/bold])"
+        )
+    else:
+        console.print(
+            "  [dim]`claude` CLI not found — skipping Claude Code registration.[/dim]\n"
+            "  To register manually: [bold]claude mcp add nff nff mcp[/bold]"
+        )
+
+    # Claude Desktop — write JSON config as well
     try:
         _update_claude_desktop_config()
         console.print(
-            f"  [bold green]✓[/bold green] MCP config written to "
+            f"  [bold green]✓[/bold green] Claude Desktop config updated: "
             f"[bold]{_CLAUDE_DESKTOP_CONFIG}[/bold]"
         )
     except ValueError as exc:
