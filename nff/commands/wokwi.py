@@ -43,6 +43,91 @@ _VSCODE_EXT  = (
     "https://marketplace.visualstudio.com/items?itemName=wokwi.wokwi-vscode"
 )
 
+_CLAUDE_MD_TEMPLATE = """\
+# nff — Wokwi Simulation Context
+
+## Hard Rules
+- Always use `nff flash --sim` to compile — never call arduino-cli directly.
+- Always use `nff wokwi run` or `nff wokwi run --gui` to simulate.
+- Never install libraries with arduino-cli. Use built-in ESP32 APIs only,
+  or ask the user to install the library first.
+- For ESP32 servo/PWM use ledcAttach + ledcWrite (built-in LEDC, no library).
+
+## Project
+- Board : {board}
+- FQBN  : {fqbn}
+- Chip  : {wokwi_chip}
+
+---
+
+## Simulation Pipeline
+
+```
+1. Write sketch      sketches/<name>/<name>.ino
+2. Edit circuit      diagram.json  (add components + wiring)
+3. Compile           nff flash --sim sketches/<name> --board {fqbn}
+4. Visual sim        nff wokwi run --gui
+   Headless sim      nff wokwi run [--timeout MS] [--serial-log FILE]
+5. Fix bugs, repeat from step 3
+```
+
+wokwi.toml must point to the compiled ELF:
+  firmware = "sketches/<name>/build/{fqbn_dotted}/<name>.elf/<name>.ino.elf"
+
+---
+
+## diagram.json — Component Wiring
+
+Always wire the serial monitor:
+  ["esp:TX0", "$serialMonitor:RX", "", []]
+  ["esp:RX0", "$serialMonitor:TX", "", []]
+
+ESP32 pin names: esp:D<gpio>  esp:GND.1  esp:GND.2  esp:3V3  esp:VIN
+
+Common components:
+  wokwi-led          attrs: color (red/green/blue/yellow)
+  wokwi-pushbutton   attrs: color — pins: btn:1.l (gpio side), btn:2.l (GND side)
+  wokwi-servo        attrs: minAngle "-90", maxAngle "90" — pins: PWM, V+, GND
+  wokwi-resistor     attrs: value (ohms)
+
+Pushbutton wiring (with INPUT_PULLUP in sketch):
+  ["esp:D15", "btn1:1.l", "green", []]
+  ["esp:GND.2", "btn1:2.l", "black", []]
+
+Servo connection:
+  ["esp:D18",  "srv1:PWM", "orange", []]
+  ["esp:3V3",  "srv1:V+",  "red",    []]
+  ["esp:GND.1","srv1:GND", "black",  []]
+
+---
+
+## ESP32 Servo — LEDC (no library required)
+
+Wokwi servo maps its full range to 500 µs – 2500 µs.
+50 Hz / 16-bit resolution (max count 65 535, period 20 000 µs):
+
+  −90°  →  duty 1638   (500 µs)
+    0°  →  duty 4915  (1500 µs)
+  +90°  →  duty 8192  (2500 µs)
+
+```cpp
+ledcAttach(SERVO_PIN, 50, 16);   // ESP32 Arduino core 3.x
+ledcWrite(SERVO_PIN, 4915);      // center
+```
+
+Always set minAngle: "-90" and maxAngle: "90" on wokwi-servo in diagram.json.
+
+---
+
+## Debugging
+
+- Compile error     → fix sketch, re-run nff flash --sim
+- Wrong output      → nff wokwi run --serial-log out.txt, inspect out.txt
+- Component silent  → check diagram.json pin names and connection direction
+- Servo wrong angle → verify duty values match the 500–2500 µs Wokwi range
+- Button not firing → INPUT_PULLUP + wiring gpio→btn:1.l, GND→btn:2.l
+"""
+
 
 # ---------------------------------------------------------------------------
 # Helpers shared by both subcommands
@@ -252,14 +337,33 @@ def wokwi_init(board: str | None, token: str | None, force: bool) -> None:
                 "[bold]export WOKWI_CLI_TOKEN=...[/bold]"
             )
 
+    # CLAUDE.md
+    wokwi_chip = diagram["parts"][0]["type"]
+    claude_md = Path.cwd() / "CLAUDE.md"
+    try:
+        claude_md.write_text(
+            _CLAUDE_MD_TEMPLATE.format(
+                board=fqbn,
+                fqbn=fqbn,
+                fqbn_dotted=fqbn.replace(":", "."),
+                wokwi_chip=wokwi_chip,
+            ),
+            encoding="utf-8",
+        )
+        console.print(
+            f"  [bold green]✓[/bold green] CLAUDE.md written to [bold]{claude_md}[/bold]"
+        )
+    except OSError as exc:
+        console.print(f"  [yellow]⚠[/yellow]  Could not write CLAUDE.md: {exc}")
+
     # Next-step hints
     console.print()
     console.print(
         "  [dim]Next steps:[/dim]\n"
-        f"    1. Compile your sketch:  "
-        f"[bold]arduino-cli compile --fqbn {fqbn} .[/bold]\n"
-        f"    2. Run the simulation:   [bold]nff wokwi run[/bold]\n"
-        f"    3. Add components to {_DIAGRAM_JSON} using the Wokwi VS Code extension:\n"
+        f"    1. Write your sketch in  [bold]sketches/<name>/<name>.ino[/bold]\n"
+        f"    2. Compile + sim:        [bold]nff flash --sim sketches/<name> --board {fqbn}[/bold]\n"
+        f"    3. Visual simulation:    [bold]nff wokwi run --gui[/bold]\n"
+        f"    4. Add components to {_DIAGRAM_JSON} using the Wokwi VS Code extension:\n"
         f"       [dim]{_VSCODE_EXT}[/dim]"
     )
 

@@ -193,11 +193,14 @@ def init(port: str | None, baud: int, force: bool) -> None:
 
 
 _CLAUDE_MD_TEMPLATE = """\
-# Hardware Development with nff
+# nff — Hardware Development Context
 
-## Rules
-Always use nff MCP tools for hardware interaction.
-Never use arduino-cli, esptool, or pyserial directly.
+## Hard Rules
+- Always use `nff flash` to compile/flash — never call arduino-cli directly.
+- Always use `nff flash --sim` for simulation — never call wokwi-cli directly.
+- Never install libraries with arduino-cli. Write sketches that use built-in APIs,
+  or ask the user to install the library first.
+- For ESP32 servo/PWM use ledcAttach + ledcWrite (built-in LEDC, no library needed).
 
 ## Connected Device
 - Board  : {board}
@@ -205,22 +208,99 @@ Never use arduino-cli, esptool, or pyserial directly.
 - FQBN   : {fqbn}
 - Wokwi  : {wokwi_chip}
 
+---
+
 ## Workflow — Real Hardware
-1. list_devices()         — verify the board is connected
-2. flash(code)            — compile + upload sketch
-3. serial_read(3000)      — capture output
-4. Iterate
 
-## Workflow — Wokwi Simulation (no hardware required)
-1. wokwi_flash(code)      — compile + simulate, returns dict with serial_output
-2. Inspect serial_output  — no board or USB cable needed
-3. Iterate with wokwi_flash until output is correct
-4. flash(code)            — upload to real hardware when ready
+```
+flash(code)           compile + upload sketch via MCP tool
+serial_read(3000)     capture 3 s of serial output
+serial_write(data)    send a string to the device
+reset_device()        hardware reset via DTR toggle
+list_devices()        verify board is connected
+get_device_info()     port / board / FQBN / baud
+```
 
-## Extending the Wokwi circuit
-- wokwi_get_diagram(board) — get a minimal diagram.json stub as a JSON string
-- Edit the JSON to add components (LEDs, sensors, resistors) and connections
-- Pass the edited diagram to wokwi_flash via the diagram parameter (future)
+Iteration loop:
+1. flash(code) — upload sketch
+2. serial_read(3000) — read output
+3. Fix bugs, repeat
+
+---
+
+## Workflow — Wokwi Simulation (no hardware needed)
+
+### Quick (MCP tool, headless)
+1. wokwi_flash(code, board="{fqbn}") — compile + simulate, returns serial_output
+2. Inspect serial_output — no USB cable required
+3. Iterate until output is correct
+4. flash(code) — upload to real hardware when ready
+
+### Full pipeline (visual, with circuit)
+1. Write sketch to sketches/<name>/<name>.ino
+2. Edit diagram.json to add components (see below)
+3. nff flash --sim sketches/<name> --board {fqbn}
+4. nff wokwi run --gui   ← opens VS Code with animated circuit
+
+wokwi.toml must point to the compiled ELF:
+  firmware = "sketches/<name>/build/{fqbn_dotted}/<name>.elf/<name>.ino.elf"
+
+---
+
+## diagram.json — Component Wiring
+
+Always wire the serial monitor:
+  ["esp:TX0", "$serialMonitor:RX", "", []]
+  ["esp:RX0", "$serialMonitor:TX", "", []]
+
+ESP32 pin names: esp:D<gpio>  esp:GND.1  esp:GND.2  esp:3V3  esp:VIN
+
+Common components:
+  wokwi-led          attrs: color (red/green/blue/yellow)
+  wokwi-pushbutton   attrs: color — pins: btn:1.l (gpio), btn:2.l (GND)
+  wokwi-servo        attrs: minAngle, maxAngle — pins: PWM, V+, GND
+  wokwi-resistor     attrs: value (ohms)
+  wokwi-ntc-temperature-sensor
+
+Pushbutton wiring:
+  ["esp:D15", "btn1:1.l", "green", []]
+  ["esp:GND.2", "btn1:2.l", "black", []]
+  pinMode(BUTTON_PIN, INPUT_PULLUP) in sketch
+
+Servo attrs for correct visual mapping:
+  {{ "minAngle": "-90", "maxAngle": "90" }}
+
+---
+
+## ESP32 Servo — LEDC (no library)
+
+Wokwi servo range: 500 µs (−90°) → 1500 µs (0°) → 2500 µs (+90°)
+50 Hz, 16-bit resolution (period = 20 000 µs, max count = 65 535):
+
+  −90°  → duty 1638
+    0°  → duty 4915
+  +90°  → duty 8192
+
+```cpp
+ledcAttach(SERVO_PIN, 50, 16);   // ESP32 Arduino core 3.x
+ledcWrite(SERVO_PIN, 4915);      // center position
+```
+
+---
+
+## Debugging
+
+Simulation:
+- Compile error    → fix sketch, re-run nff flash --sim
+- Wrong output     → nff wokwi run --serial-log out.txt, inspect out.txt
+- Component silent → check diagram.json pin names and connection direction
+- Servo wrong angle→ verify duty values match the 500–2500 µs Wokwi range
+- Button skipped   → ensure INPUT_PULLUP and wiring gpio→btn:1.l, GND→btn:2.l
+
+Hardware:
+- Port not found   → nff init to re-detect
+- Upload fails     → nff flash --manual-reset, hold BOOT when prompted
+- Wrong output     → nff monitor --baud 115200
 """
 
 
@@ -231,6 +311,7 @@ def _write_claude_md(port: str, board: str, fqbn: str, wokwi_chip: str | None) -
         board=board,
         port=port,
         fqbn=fqbn or "unknown",
+        fqbn_dotted=(fqbn or "unknown").replace(":", "."),
         wokwi_chip=wokwi_chip or "not supported",
     )
     dest.write_text(content, encoding="utf-8")
