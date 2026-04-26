@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import tempfile
+from pathlib import Path
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
@@ -11,6 +14,7 @@ from nff import config as cfg_module
 from nff.tools import boards as boards_module
 from nff.tools import serial as serial_module
 from nff.tools import toolchain
+from nff.tools import wokwi as wokwi_module
 
 mcp = FastMCP("nff")
 
@@ -56,8 +60,21 @@ def _resolve_port(port: str | None) -> str:
     raise ValueError("No port specified and no default port in config. Run `nff init`.")
 
 
+def _resolve_fqbn(board: str | None) -> str:
+    """Return FQBN from arg or config. Raises ValueError if unresolvable."""
+    if board:
+        return board
+    try:
+        fqbn = cfg_module.get_default_device().get("fqbn") or ""
+        if fqbn:
+            return fqbn
+    except cfg_module.ConfigError:
+        pass
+    raise ValueError("Missing board FQBN (pass board= or run `nff init`)")
+
+
 # ---------------------------------------------------------------------------
-# MCP Tools
+# Hardware tools
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
@@ -72,6 +89,7 @@ async def list_devices() -> dict[str, Any]:
                 "fqbn": d.fqbn,
                 "vendor_id": d.vendor_id,
                 "product_id": d.product_id,
+                "wokwi_chip": d.wokwi_chip,
             }
             for d in devices
         ]
@@ -164,7 +182,7 @@ async def get_device_info(port: str | None = None) -> dict[str, Any]:
         port: Serial port to query. Defaults to the config default device.
 
     Returns:
-        Dict with port, board, fqbn, baud, vendor_id, product_id.
+        Dict with port, board, fqbn, baud, vendor_id, product_id, wokwi_chip.
         Contains 'error' key on failure.
     """
     try:
@@ -189,6 +207,7 @@ async def get_device_info(port: str | None = None) -> dict[str, Any]:
             "baud": baud,
             "vendor_id": device.vendor_id,
             "product_id": device.product_id,
+            "wokwi_chip": device.wokwi_chip,
         }
 
     # Port is known but board isn't in BOARD_MAP — return what config has.
@@ -199,7 +218,167 @@ async def get_device_info(port: str | None = None) -> dict[str, Any]:
         "baud": baud,
         "vendor_id": "",
         "product_id": "",
+        "wokwi_chip": None,
     }
+
+
+# ---------------------------------------------------------------------------
+# Wokwi simulation tools
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+async def wokwi_flash(
+    code: str,
+    board: str | None = None,
+    timeout_ms: int = 5000,
+) -> dict[str, Any]:
+    """Compile a sketch and run it in the Wokwi simulator — no hardware needed.
+
+    Compiles *code* with arduino-cli (no upload), generates a minimal
+    diagram.json for the target board, then runs wokwi-cli to simulate.
+
+    Args:
+        code: Full Arduino/C++ sketch source code.
+        board: Board FQBN, e.g. 'arduino:avr:uno'. Defaults to config.
+        timeout_ms: Simulation wall-clock timeout in milliseconds. Default 5000.
+
+    Returns:
+        Dict with keys: serial_output, compile_output, exit_code, simulated.
+        exit_code is non-zero on any failure; check compile_output for details.
+    """
+    try:
+        fqbn = _resolve_fqbn(board)
+    except ValueError as exc:
+        return {
+            "serial_output": "",
+            "compile_output": str(exc),
+            "exit_code": 1,
+            "simulated": True,
+        }
+
+    try:
+        compile_output, elf_path = await asyncio.to_thread(
+            toolchain.compile, code, fqbn
+        )
+    except Exception as exc:
+        return {
+            "serial_output": "",
+            "compile_output": f"compile error: {exc}",
+            "exit_code": 1,
+            "simulated": True,
+        }
+
+    with tempfile.TemporaryDirectory() as _tmpdir:
+        project_dir = Path(_tmpdir)
+        try:
+            diagram = wokwi_module.generate_diagram(fqbn)
+            (project_dir / "diagram.json").write_text(
+                json.dumps(diagram, indent=2), encoding="utf-8"
+            )
+            wokwi_module.write_wokwi_toml(project_dir, elf_path)
+        except wokwi_module.WokwiError as exc:
+            return {
+                "serial_output": "",
+                "compile_output": f"{compile_output}\nwokwi setup error: {exc}",
+                "exit_code": 1,
+                "simulated": True,
+            }
+
+        try:
+            runner = wokwi_module.WokwiRunner()
+            sim_result = await asyncio.to_thread(
+                runner.run, project_dir, timeout_ms=timeout_ms
+            )
+        except wokwi_module.WokwiError as exc:
+            return {
+                "serial_output": f"wokwi error: {exc}",
+                "compile_output": compile_output,
+                "exit_code": 1,
+                "simulated": True,
+            }
+
+    return {
+        "serial_output": sim_result.serial_output,
+        "compile_output": compile_output,
+        "exit_code": sim_result.exit_code,
+        "simulated": True,
+    }
+
+
+@mcp.tool()
+async def wokwi_serial_read(
+    code: str,
+    board: str | None = None,
+    duration_ms: int = 3000,
+) -> str:
+    """Compile and simulate a sketch, returning only the serial output.
+
+    Convenience wrapper around wokwi_flash for when only serial output
+    matters and compile details are not needed.
+
+    Args:
+        code: Full Arduino/C++ sketch source code.
+        board: Board FQBN. Defaults to config.
+        duration_ms: Simulation duration in milliseconds. Default 3000.
+
+    Returns:
+        Captured serial output as a plain string, or 'ERROR: <reason>'
+        on failure.
+    """
+    try:
+        fqbn = _resolve_fqbn(board)
+    except ValueError as exc:
+        return f"ERROR: {exc}"
+
+    try:
+        compile_output, elf_path = await asyncio.to_thread(
+            toolchain.compile, code, fqbn
+        )
+    except Exception as exc:
+        return f"ERROR: compile failed: {exc}"
+
+    with tempfile.TemporaryDirectory() as _tmpdir:
+        project_dir = Path(_tmpdir)
+        try:
+            diagram = wokwi_module.generate_diagram(fqbn)
+            (project_dir / "diagram.json").write_text(
+                json.dumps(diagram, indent=2), encoding="utf-8"
+            )
+            wokwi_module.write_wokwi_toml(project_dir, elf_path)
+        except wokwi_module.WokwiError as exc:
+            return f"ERROR: {exc}"
+
+        try:
+            runner = wokwi_module.WokwiRunner()
+            sim_result = await asyncio.to_thread(
+                runner.run, project_dir, timeout_ms=duration_ms
+            )
+        except wokwi_module.WokwiError as exc:
+            return f"ERROR: {exc}"
+
+    return sim_result.serial_output
+
+
+@mcp.tool()
+async def wokwi_get_diagram(board: str) -> str:
+    """Return a minimal Wokwi diagram.json as a JSON string for the given board.
+
+    The diagram contains a single MCU component with no wiring. Claude can
+    extend it by parsing the JSON, adding parts and connections, then
+    writing the result back to diagram.json before calling wokwi_flash.
+
+    Args:
+        board: Board FQBN, e.g. 'arduino:avr:uno'.
+
+    Returns:
+        A JSON string (pretty-printed) ready to write to diagram.json,
+        or 'ERROR: <reason>' if the board is not supported by Wokwi.
+    """
+    try:
+        diagram = wokwi_module.generate_diagram(board)
+    except wokwi_module.WokwiError as exc:
+        return f"ERROR: {exc}"
+    return json.dumps(diagram, indent=2)
 
 
 # ---------------------------------------------------------------------------

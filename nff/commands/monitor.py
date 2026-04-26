@@ -73,6 +73,12 @@ def monitor(
     Press Ctrl+C to exit cleanly.
 
     Port and baud rate default to the values stored by `nff init`.
+
+    \b
+    This command requires a physical board connected over USB.
+    For Wokwi simulation output use:
+      nff flash FILE --sim          (one-shot compile + simulate)
+      nff wokwi run                 (run an existing Wokwi project)
     """
     resolved_port, resolved_baud = _resolve_connection(port, baud)
 

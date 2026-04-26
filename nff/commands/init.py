@@ -193,29 +193,127 @@ def init(port: str | None, baud: int, force: bool) -> None:
 
 
 _CLAUDE_MD_TEMPLATE = """\
-# Hardware Development with nff
+# nff — Hardware Development Context
 
-## Rules
-Always use nff MCP tools for hardware interaction.
-Never use arduino-cli, esptool, or pyserial directly.
+## Hard Rules
+- Always use `nff flash` to compile/flash — never call arduino-cli directly.
+- Always use `nff flash --sim` for simulation — never call wokwi-cli directly.
+- Never install libraries with arduino-cli. Write sketches that use built-in APIs,
+  or ask the user to install the library first.
+- For ESP32 servo/PWM use ledcAttach + ledcWrite (built-in LEDC, no library needed).
 
 ## Connected Device
-- Board: {board}
-- Port: {port}
-- Mode: {mode}
+- Board  : {board}
+- Port   : {port}
+- FQBN   : {fqbn}
+- Wokwi  : {wokwi_chip}
 
-## Workflow
-1. list_devices() — verify connection
-2. flash(code) — compile + upload
-3. serial_read(3000) — check output
-4. Iterate this way, Claude knows that it has to call nff to write to my esp32
+---
+
+## Workflow — Real Hardware
+
+```
+flash(code)           compile + upload sketch via MCP tool
+serial_read(3000)     capture 3 s of serial output
+serial_write(data)    send a string to the device
+reset_device()        hardware reset via DTR toggle
+list_devices()        verify board is connected
+get_device_info()     port / board / FQBN / baud
+```
+
+Iteration loop:
+1. flash(code) — upload sketch
+2. serial_read(3000) — read output
+3. Fix bugs, repeat
+
+---
+
+## Workflow — Wokwi Simulation (no hardware needed)
+
+### Quick (MCP tool, headless)
+1. wokwi_flash(code, board="{fqbn}") — compile + simulate, returns serial_output
+2. Inspect serial_output — no USB cable required
+3. Iterate until output is correct
+4. flash(code) — upload to real hardware when ready
+
+### Full pipeline (visual, with circuit)
+1. Write sketch to sketches/<name>/<name>.ino
+2. Edit diagram.json to add components (see below)
+3. nff flash --sim sketches/<name> --board {fqbn}
+4. nff wokwi run --gui   ← opens VS Code with animated circuit
+
+wokwi.toml must point to the compiled ELF:
+  firmware = "sketches/<name>/build/{fqbn_dotted}/<name>.elf/<name>.ino.elf"
+
+---
+
+## diagram.json — Component Wiring
+
+Always wire the serial monitor:
+  ["esp:TX0", "$serialMonitor:RX", "", []]
+  ["esp:RX0", "$serialMonitor:TX", "", []]
+
+ESP32 pin names: esp:D<gpio>  esp:GND.1  esp:GND.2  esp:3V3  esp:VIN
+
+Common components:
+  wokwi-led          attrs: color (red/green/blue/yellow)
+  wokwi-pushbutton   attrs: color — pins: btn:1.l (gpio), btn:2.l (GND)
+  wokwi-servo        attrs: minAngle, maxAngle — pins: PWM, V+, GND
+  wokwi-resistor     attrs: value (ohms)
+  wokwi-ntc-temperature-sensor
+
+Pushbutton wiring:
+  ["esp:D15", "btn1:1.l", "green", []]
+  ["esp:GND.2", "btn1:2.l", "black", []]
+  pinMode(BUTTON_PIN, INPUT_PULLUP) in sketch
+
+Servo attrs for correct visual mapping:
+  {{ "minAngle": "-90", "maxAngle": "90" }}
+
+---
+
+## ESP32 Servo — LEDC (no library)
+
+Wokwi servo range: 500 µs (−90°) → 1500 µs (0°) → 2500 µs (+90°)
+50 Hz, 16-bit resolution (period = 20 000 µs, max count = 65 535):
+
+  −90°  → duty 1638
+    0°  → duty 4915
+  +90°  → duty 8192
+
+```cpp
+ledcAttach(SERVO_PIN, 50, 16);   // ESP32 Arduino core 3.x
+ledcWrite(SERVO_PIN, 4915);      // center position
+```
+
+---
+
+## Debugging
+
+Simulation:
+- Compile error    → fix sketch, re-run nff flash --sim
+- Wrong output     → nff wokwi run --serial-log out.txt, inspect out.txt
+- Component silent → check diagram.json pin names and connection direction
+- Servo wrong angle→ verify duty values match the 500–2500 µs Wokwi range
+- Button skipped   → ensure INPUT_PULLUP and wiring gpio→btn:1.l, GND→btn:2.l
+
+Hardware:
+- Port not found   → nff init to re-detect
+- Upload fails     → nff flash --manual-reset, hold BOOT when prompted
+- Wrong output     → nff monitor --baud 115200
 """
 
 
-def _write_claude_md(port: str, board: str, fqbn: str) -> None:
+def _write_claude_md(port: str, board: str, fqbn: str, wokwi_chip: str | None) -> None:
     """Write CLAUDE.md into the current working directory."""
     dest = Path.cwd() / "CLAUDE.md"
-    content = _CLAUDE_MD_TEMPLATE.format(board=board, port=port, mode=fqbn or "unknown")
+    content = _CLAUDE_MD_TEMPLATE.format(
+        board=board,
+        port=port,
+        fqbn=fqbn or "unknown",
+        fqbn_dotted=(fqbn or "unknown").replace(":", "."),
+        wokwi_chip=wokwi_chip or "not supported",
+    )
     dest.write_text(content, encoding="utf-8")
     console.print(
         f"  [bold green]✓[/bold green] CLAUDE.md written to [bold]{dest}[/bold]"
@@ -225,10 +323,16 @@ def _write_claude_md(port: str, board: str, fqbn: str) -> None:
 def _write_success(port: str, board: str, device: DetectedDevice | None) -> None:
     """Print the success lines and update the Claude Desktop config."""
     if device:
+        wokwi_note = (
+            f"  [dim cyan]sim: {device.wokwi_chip}[/dim cyan]"
+            if device.wokwi_chip
+            else "  [dim]no Wokwi support[/dim]"
+        )
         console.print(
             f"  [bold green]✓[/bold green] Found: [bold]{device.board}[/bold] "
             f"on {device.port} "
             f"(vendor: {device.vendor_id}, product: {device.product_id})"
+            f"{wokwi_note}"
         )
 
     console.print(
@@ -239,7 +343,8 @@ def _write_success(port: str, board: str, device: DetectedDevice | None) -> None
     # Write CLAUDE.md in cwd
     try:
         fqbn = device.fqbn if device else ""
-        _write_claude_md(port=port, board=board, fqbn=fqbn)
+        wokwi_chip = device.wokwi_chip if device else None
+        _write_claude_md(port=port, board=board, fqbn=fqbn, wokwi_chip=wokwi_chip)
     except OSError as exc:
         console.print(f"  [yellow]⚠[/yellow]  Could not write CLAUDE.md: {exc}")
 
