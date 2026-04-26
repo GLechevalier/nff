@@ -254,8 +254,9 @@ def wokwi_run(timeout_ms: int, serial_log: Path | None) -> None:
             "  [yellow]⚠[/yellow]  No Wokwi API token — simulation may fail.\n"
             "    Run [bold]nff wokwi init --token YOUR_TOKEN[/bold] to configure one."
         )
-
-    cmd = ["wokwi-cli", "run", str(cwd), "--timeout", str(timeout_ms)]
+    wokwi_cli_exe = toolchain.find_wokwi_cli()
+    print(wokwi_cli_exe)
+    cmd = [str(wokwi_cli_exe), str(cwd), "--timeout", str(timeout_ms)]
 
     # -- run ------------------------------------------------------------------
 

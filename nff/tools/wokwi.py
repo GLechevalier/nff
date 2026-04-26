@@ -26,6 +26,7 @@ import os
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
+import nff.tools.toolchain as toolchain
 
 from nff.config import ConfigError, get_wokwi_config
 _SENTINEL = object()
@@ -198,8 +199,9 @@ class WokwiRunner:
             WokwiError: If ``wokwi-cli`` is not installed, or if the
                 subprocess times out at the OS level.
         """
+        wokwi_cli_exe = toolchain.find_wokwi_cli()
         cmd = [
-            "wokwi-cli", "run",
+            str(wokwi_cli_exe), "run",
             str(project_dir),
             "--timeout", str(timeout_ms),
         ]

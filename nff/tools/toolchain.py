@@ -368,7 +368,7 @@ def stream_compile(sketch_dir: pathlib.Path, fqbn: str) -> ProcessStream:
         ToolchainError: If arduino-cli is missing or fails to start.
     """
     exe = _require_arduino_cli()
-    return _stream_process([exe, "compile", "--fqbn", fqbn, str(sketch_dir)])
+    return _stream_process([exe, "compile", "--fqbn", fqbn, str(sketch_dir), "--build-path", str(elf_path_for(sketch_dir, fqbn))])
 
 
 def stream_upload(sketch_dir: pathlib.Path, fqbn: str, port: str) -> ProcessStream:
