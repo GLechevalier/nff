@@ -30,6 +30,7 @@ if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
 from nff import config as cfg_module
 from nff.tools import boards as boards_module
 from nff.tools import toolchain
+from nff.tools import wokwi as wokwi_module
 
 console = Console(legacy_windows=False)
 
@@ -38,8 +39,9 @@ _CLAUDE_DESKTOP_CONFIG = Path.home() / ".claude" / "claude_desktop_config.json"
 
 class Check(NamedTuple):
     passed: bool
-    detail: str          # printed next to ✓ / ✗
-    fix: str | None = None   # hint shown when failed
+    detail: str             # printed next to ✓ / ✗ / ⚠
+    fix: str | None = None  # hint shown when failed
+    optional: bool = False  # True → warn with ⚠ instead of failing with ✗
 
 
 # ---------------------------------------------------------------------------
@@ -96,19 +98,35 @@ def check_config() -> Check:
 
 
 def check_device() -> Check:
-    """Check that a recognised board is detected and its port is openable."""
+    """Check that a recognised board is detected and its port is openable.
+
+    This check is optional — Wokwi simulation works without any physical
+    hardware, so a missing device is a warning rather than a hard failure.
+    """
     # Lazy import — pyserial may not be installed; check_pyserial will flag it.
     try:
         import serial as _serial
     except ImportError:
-        return Check(False, "Cannot check device — pyserial missing", "Run: pip install pyserial")
+        return Check(
+            False,
+            "Cannot check device — pyserial missing",
+            "Run: pip install pyserial",
+            optional=True,
+        )
 
     devices = boards_module.list_devices()
     if not devices:
-        return Check(False, "No recognised board detected", "Plug in a board and run nff init")
+        return Check(
+            False,
+            "No recognised board detected",
+            "Plug in a board and run `nff init`  (or use `nff flash --sim` / Wokwi tools without hardware)",
+            optional=True,
+        )
 
     device = devices[0]
     label = f"Device detected: {device.board} on {device.port}"
+    if device.wokwi_chip:
+        label += f"  [sim: {device.wokwi_chip}]"
 
     try:
         conn = _serial.Serial(device.port, timeout=0.5)
@@ -117,7 +135,7 @@ def check_device() -> Check:
         fix = f"Port {device.port} is inaccessible: {exc}"
         if platform.system() == "Linux":
             fix += "\n    → Add yourself to the dialout group: sudo usermod -aG dialout $USER"
-        return Check(False, f"{label} — port inaccessible", fix)
+        return Check(False, f"{label} — port inaccessible", fix, optional=True)
 
     return Check(True, label)
 
@@ -138,6 +156,44 @@ def check_claude_desktop() -> Check:
     return Check(True, f"Claude Desktop config OK  ({_CLAUDE_DESKTOP_CONFIG})")
 
 
+def check_wokwi_cli() -> Check:
+    """Check that wokwi-cli is installed. Optional — only needed for simulation."""
+    version = toolchain.wokwi_cli_version()
+    if version:
+        loc = toolchain.find_wokwi_cli()
+        return Check(True, f"{version}  ({loc})", optional=True)
+    return Check(
+        False,
+        "wokwi-cli not found  (optional — required for --sim and nff wokwi)",
+        "Install from https://github.com/wokwi/wokwi-cli",
+        optional=True,
+    )
+
+
+def check_wokwi_token() -> Check:
+    """Check that a Wokwi CI API token is configured. Optional."""
+    import os
+
+    env_token = os.environ.get("WOKWI_CLI_TOKEN")
+    if env_token:
+        return Check(True, "Wokwi API token configured  (from WOKWI_CLI_TOKEN env)", optional=True)
+
+    try:
+        token = wokwi_module._resolve_token()
+    except Exception:
+        token = None
+
+    if token:
+        return Check(True, f"Wokwi API token configured  (from {cfg_module.CONFIG_PATH})", optional=True)
+
+    return Check(
+        False,
+        "Wokwi API token not configured  (optional — required for simulation)",
+        "Set WOKWI_CLI_TOKEN or run: nff wokwi init",
+        optional=True,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Click command
 # ---------------------------------------------------------------------------
@@ -150,6 +206,8 @@ _CHECKS = [
     check_config,
     check_device,
     check_claude_desktop,
+    check_wokwi_cli,
+    check_wokwi_token,
 ]
 
 
@@ -162,6 +220,10 @@ def doctor() -> None:
         result = fn()
         if result.passed:
             console.print(f"  [bold green]✓[/bold green] {result.detail}")
+        elif result.optional:
+            console.print(f"  [bold yellow]⚠[/bold yellow] {result.detail}")
+            if result.fix:
+                console.print(f"    [yellow]→[/yellow] {result.fix}")
         else:
             console.print(f"  [bold red]✗[/bold red] {result.detail}")
             if result.fix:
