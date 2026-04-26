@@ -100,7 +100,15 @@ Always keep the serial monitor wired:
 
 **ESP32 pin naming:** `esp:D<gpio>` (e.g. `esp:D18`), `esp:GND.1`, `esp:GND.2`, `esp:3V3`, `esp:VIN`
 
-**Common components:**
+**Common components and their pins — use `/wokwi-diagram` for the full reference:**
+
+| Type | Pins |
+|---|---|
+| `wokwi-led` | `A` (anode), `C` (cathode — **not K**) |
+| `wokwi-resistor` | `1`, `2` |
+| `wokwi-pushbutton` | `1.l`, `1.r`, `2.l`, `2.r` |
+| `wokwi-servo` | `PWM`, `V+`, `GND` |
+| `wokwi-ntc-temperature-sensor` | `VCC`, `GND`, `OUT` |
 
 ```json
 { "type": "wokwi-led",         "id": "led1",   "attrs": { "color": "red" } }
@@ -109,9 +117,6 @@ Always keep the serial monitor wired:
 { "type": "wokwi-resistor",    "id": "r1",     "attrs": { "value": "220" } }
 { "type": "wokwi-ntc-temperature-sensor", "id": "tmp1", "attrs": {} }
 ```
-
-**Pushbutton pins:** `btn1:1.l` and `btn1:2.l` (one side each — `1.*` connects to `2.*` when pressed).
-**Servo pins:** `srv1:PWM`, `srv1:V+`, `srv1:GND`
 
 ---
 
