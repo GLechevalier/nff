@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from nff.config import ConfigError, get_wokwi_config
+_SENTINEL = object()
 
 # Maps board FQBNs to Wokwi simulator chip IDs.
 # Only boards with confirmed Wokwi support are listed here.
@@ -164,8 +165,13 @@ class WokwiRunner:
             :func:`_resolve_token` (env var → config → ``None``).
     """
 
-    def __init__(self, token: str | None = None) -> None:
-        self.token: str | None = token if token is not None else _resolve_token()
+    def __init__(self, token: str | None = _SENTINEL) -> None:
+        if token is _SENTINEL:
+            # No argument passed → auto-resolve
+            self.token = _resolve_token()
+        else:
+            # Explicit value (including None) → respect it
+            self.token = token
 
     def run(
         self,
