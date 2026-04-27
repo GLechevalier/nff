@@ -208,6 +208,59 @@ I2C (e.g. LCD, BMP180):
 
 ---
 
+### wokwi-franzininho (ATtiny85-based board)
+
+Brazilian open-source ATtiny85 board. Same chip as `wokwi-attiny85` — see that entry for library and limitation details. Type name is `wokwi-franzininho`.
+
+Pin naming in diagram.json: **`PB0`–`PB5`** (not board pin numbers 0–5).
+Power: `VCC.1`/`VCC.2` and `GND.1`/`GND.2` — **always use the numbered suffixes**.
+
+| Board pin | Pin name | ATtiny85 | Functions | PWM |
+|---|---|---|---|---|
+| 0 | `PB0` | PB0 | SPI MOSI, I2C SDA | Yes |
+| 1 | `PB1` | PB1 | SPI MISO, **LED1 (yellow onboard)** | Yes |
+| 2 | `PB2` | PB2 | SPI SCK, I2C SCL | - |
+| 3 | `PB3` | PB3 | | - |
+| 4 | `PB5` | PB5 | Reset / ADC0 | - |
+| 5 | `PB4` | PB4 | ADC2 | Yes |
+
+Onboard LEDs (no wiring needed):
+- **ON** (green) — power LED, always lit
+- **LED1** (yellow) — connected to `PB1`
+
+```json
+{ "type": "wokwi-franzininho", "id": "franzininho", "top": 0, "left": 0, "attrs": {} }
+```
+
+I2C (SDA=PB0, SCL=PB2):
+```json
+["franzininho:PB0", "dev1:SDA", "orange", []],
+["franzininho:PB2", "dev1:SCL", "purple", []],
+["franzininho:VCC.2","dev1:VCC", "red",   []],
+["franzininho:GND.2","dev1:GND", "black", []]
+```
+
+74HC595 shift register (DS=PB5, STCP=PB3, SHCP=PB4):
+```json
+["franzininho:PB5", "sr1:DS",   "yellow", []],
+["franzininho:PB3", "sr1:STCP", "orange", []],
+["franzininho:PB4", "sr1:SHCP", "purple", []],
+["franzininho:VCC.2","sr1:VCC", "red",    []],
+["franzininho:VCC.2","sr1:MR",  "red",    []],
+["franzininho:GND.2","sr1:GND", "black",  []],
+["franzininho:GND.2","sr1:OE",  "black",  []]
+```
+
+HC-SR04 ultrasonic (TRIG=PB5, ECHO=PB3):
+```json
+["franzininho:PB5",  "ultrasonic1:TRIG", "orange", []],
+["franzininho:PB3",  "ultrasonic1:ECHO", "yellow", []],
+["franzininho:VCC.2","ultrasonic1:VCC",  "red",    []],
+["franzininho:GND.2","ultrasonic1:GND",  "black",  []]
+```
+
+---
+
 ### wokwi-attiny85
 
 8-bit AVR, 8 KB Flash, 512 B SRAM, 512 B EEPROM. Default clock: 8 MHz.
