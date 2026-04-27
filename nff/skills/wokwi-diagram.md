@@ -93,6 +93,41 @@ Example: `["v10", "h5", "*", "v-15", "h10"]` — from source: down 10, right 5; 
 
 ## MCU Pin Reference
 
+### board-franzininho-wifi (ESP32-S2)
+
+Open-source Brazilian ESP32-S2 board. Pin names are **numeric without `D` prefix** (e.g. `esp:1`, `esp:8`).
+
+| Pin group | Names |
+|---|---|
+| GPIO | `1`–`21`, `33`–`40` (numeric, no `D` prefix) |
+| UART | `TX`, `RX` |
+| I2C default | `SDA = 8`, `SCL = 9` |
+| Power | `3V3`, `5V.1`, `5V.2`, `GND.1`, `GND.2` |
+
+Built-in LEDs (no wiring needed):
+- Pin `33` → orange LED
+- Pin `21` → blue LED
+
+CircuitPython: set `attrs: { "env": "circuitpython-7.2.0" }`.
+
+```json
+{ "type": "board-franzininho-wifi", "id": "esp", "top": 0, "left": 0, "attrs": {} }
+```
+
+Serial monitor:
+```json
+["esp:TX", "$serialMonitor:RX", "", []],
+["esp:RX", "$serialMonitor:TX", "", []]
+```
+
+I2C (e.g. LCD, BMP180):
+```json
+["dev1:SDA", "esp:8", "goldenrod", []],
+["dev1:SCL", "esp:9", "purple",    []]
+```
+
+---
+
 ### wokwi-esp32-devkit-v1
 
 | Pin group | Names |
