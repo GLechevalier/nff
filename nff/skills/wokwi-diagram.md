@@ -159,9 +159,38 @@ Pin naming: **numeric without prefix** (`2`, `13`) — NOT `D2`/`D13`.
 
 Onboard LED: pin `13` = `LED_BUILTIN`.
 
+### wokwi-arduino-mega
+
+ATmega2560, 16 MHz, 256 KB Flash, 8 KB SRAM, 4 KB EEPROM.
+Pin naming: **numeric without prefix** (`2`, `13`, `A0`) — same as Uno.
+
+| Pin group | Names |
+|---|---|
+| Digital | `0`–`53` |
+| Analog | `A0`–`A15` |
+| PWM | `2`–`13`, `44`, `45`, `46` |
+| GND | `GND.1` (near pin 13), `GND.2`/`GND.3` (near Vin), `GND.4`/`GND.5` (dual-row header) |
+| Power | `5V`, `VIN`, `5V.1`, `5V.2` (dual-row header) |
+| I2C | SDA = `20`, SCL = `21` |
+| SPI | MISO = `50`, MOSI = `51`, SCK = `52` |
+| Serial1 | TX = `18`, RX = `19` |
+| Serial2 | TX = `16`, RX = `17` |
+| Serial3 | TX = `14`, RX = `15` |
+
+Onboard LED: pin `13` = `LED_BUILTIN`.
+Simulation: I2C and SPI are master-only; 16-bit timer input capture not implemented.
+
+Serial monitor (Serial0, same as Uno):
+```json
+["mega:0", "$serialMonitor:TX", "", []],
+["mega:1", "$serialMonitor:RX", "", []]
+```
+
+---
+
 ### wokwi-arduino-nano
 
-Same as Uno plus `AREF`. Power: `5V`, `3V3`, `GND.1`, `GND.2`.
+Same as Uno plus `AREF`. Power: `5V`, `3V3`, `GND.1`, `GND.2`. Pin naming: numeric without prefix.
 
 ---
 
@@ -914,5 +943,6 @@ Supports simulation controls (sliders) and automation `set-control` for `tempera
 |---|---|
 | `led1:K` | `led1:C` — Wokwi uses `C` for cathode, not the standard `K` |
 | `esp:GND` | `esp:GND.1` or `esp:GND.2` — always use the numbered suffix |
-| `esp:GPIO2` | `esp:D2` — Wokwi prefixes GPIO numbers with `D` |
+| `esp:GPIO2` | `esp:D2` — ESP32 prefixes GPIO numbers with `D` |
 | `esp:TX0` in connections | `esp:TX` — omit the `0` suffix for UART pins |
+| `uno:D2` | `uno:2` — Arduino Uno/Mega/Nano use numeric pins, no `D` prefix |
