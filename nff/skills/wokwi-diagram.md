@@ -146,18 +146,23 @@ I2C (e.g. LCD, BMP180):
 
 ### wokwi-arduino-uno
 
+ATmega328p, 16 MHz, 32 KB Flash, 2 KB SRAM, 1 KB EEPROM.
 Pin naming: **numeric without prefix** (`2`, `13`) — NOT `D2`/`D13`.
 
 | Pin group | Names |
 |---|---|
 | Digital | `0`–`13` |
-| Analog | `A0`–`A5` |
-| Power | `5V`, `3V3`, `GND.1`, `GND.2` |
+| Analog | `A0`–`A5` (also usable as digital GPIO) |
+| PWM | `3`, `5`, `6`, `9`, `10`, `11` |
+| GND | `GND.1` (top, near pin 13), `GND.2`, `GND.3` (bottom) |
+| Power | `5V`, `VIN` |
 | I2C | SDA = `A4`, SCL = `A5` |
-| SPI | MISO = `12`, MOSI = `11`, SCK = `13` |
-| Other | `AREF`, `IOREF`, `RESET` |
+| SPI | SS = `10`, MOSI = `11`, MISO = `12`, SCK = `13` |
+| Interrupts | INT0 = `2`, INT1 = `3` |
 
 Onboard LED: pin `13` = `LED_BUILTIN`.
+Attr: `"frequency"`: `"8m"`, `"16m"` (default), `"20m"` — changing breaks most libraries.
+Simulation: I2C/SPI master only; Analog Comparator not implemented.
 
 ### wokwi-arduino-mega
 
@@ -190,7 +195,10 @@ Serial monitor (Serial0, same as Uno):
 
 ### wokwi-arduino-nano
 
-Same as Uno plus `AREF`. Power: `5V`, `3V3`, `GND.1`, `GND.2`. Pin naming: numeric without prefix.
+ATmega328p — same as Uno (32 KB Flash, 2 KB SRAM, 1 KB EEPROM). Pin naming: numeric without prefix.
+Power: `5V`, `3V3`, `GND.1`, `GND.2`. Same I2C/SPI pins as Uno (A4/A5, 12/11/13).
+
+Difference from Uno: adds `A6` and `A7` — **analog input only**, cannot be used as digital GPIO.
 
 ---
 
