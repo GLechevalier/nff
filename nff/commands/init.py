@@ -13,6 +13,7 @@ if __name__ == "__main__":
 import json
 import shutil
 import subprocess
+from importlib import resources
 from pathlib import Path
 
 import click
@@ -105,6 +106,33 @@ def _register_mcp_claude_code() -> bool:
         return result.returncode == 0
     except (OSError, subprocess.TimeoutExpired):
         return False
+
+
+def _install_claude_skills() -> None:
+    """Copy bundled skill files to ~/.claude/commands/ (user-level global skills).
+
+    Silently skips any file that cannot be written so it never aborts init.
+    """
+    dest_dir = Path.home() / ".claude" / "commands"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    skills_pkg = resources.files("nff") / "skills"
+    installed: list[str] = []
+    for skill_file in skills_pkg.iterdir():
+        if not skill_file.name.endswith(".md"):
+            continue
+        try:
+            dest = dest_dir / skill_file.name
+            dest.write_text(skill_file.read_text(encoding="utf-8"), encoding="utf-8")
+            installed.append(skill_file.name)
+        except OSError:
+            pass
+
+    if installed:
+        names = ", ".join(f"/{p.removesuffix('.md')}" for p in installed)
+        console.print(
+            f"  [bold green]✓[/bold green] Claude skills installed: [bold]{names}[/bold]"
+        )
 
 
 def _update_claude_desktop_config() -> None:
@@ -378,6 +406,12 @@ def _write_success(port: str, board: str, device: DetectedDevice | None) -> None
         _write_claude_md(port=port, board=board, fqbn=fqbn, wokwi_chip=wokwi_chip)
     except OSError as exc:
         console.print(f"  [yellow]⚠[/yellow]  Could not write CLAUDE.md: {exc}")
+
+    # Install Claude skills globally
+    try:
+        _install_claude_skills()
+    except Exception as exc:
+        console.print(f"  [yellow]⚠[/yellow]  Could not install Claude skills: {exc}")
 
     # Claude Code CLI — preferred
     if _register_mcp_claude_code():
