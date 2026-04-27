@@ -155,6 +155,19 @@ Same as Uno plus `AREF`. Power: `5V`, `3V3`, `GND.1`, `GND.2`.
 
 ---
 
+### board-st-nucleo-c031c6 (STM32 Nucleo-64)
+
+ARM Cortex-M0+, 48 MHz, 32 KB Flash, 12 KB RAM.
+
+Onboard LED: `PA5` = `D13` = `LED_BUILTIN` — lit when driven HIGH.
+
+Simulated peripherals: GPIO, USART, I2C (master only), SPI (master only), ADC, TIM1/3/14/16/17 (analogWrite), CRC, EXTI, GDB debugging.
+Not simulated: DMA, IWDG, RTC, PWR, SYSCFG.
+
+> No diagram.json example available yet — add wiring snippets when a reference circuit is confirmed.
+
+---
+
 ## Component Pin Reference
 
 ### wokwi-led
