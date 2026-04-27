@@ -424,6 +424,46 @@ Attrs: `"label"` sets a display label. `"bounce": "0"` disables contact bounce. 
 
 ---
 
+### wokwi-biaxial-stepper (concentric dual stepper)
+
+Two stepper motors in one enclosure sharing the same axis — outer shaft and inner shaft. Drive with two separate `wokwi-a4988` drivers.
+
+| Pins | Motor |
+|---|---|
+| `A1-` `A1+` `B1+` `B1-` | Outer shaft (coils A and B) |
+| `A2-` `A2+` `B2+` `B2-` | Inner shaft (coils A and B) |
+
+| Attr | Default | Options |
+|---|---|---|
+| `outerHandLength` | `"30"` | `"20"`–`"70"` |
+| `outerHandColor` | `"gold"` | any CSS color |
+| `outerHandShape` | `"plain"` | `"plain"`, `"arrow"`, `"ornate"` |
+| `innerHandLength` | `"30"` | `"20"`–`"70"` |
+| `innerHandColor` | `"silver"` | any CSS color |
+| `innerHandShape` | `"plain"` | `"plain"`, `"arrow"`, `"ornate"` |
+
+**In simulation, coils can be wired directly to MCU GPIO pins — no A4988 needed.**
+For real hardware, use two A4988 drivers (one per motor).
+
+Direct wiring to Arduino Uno (outer = pins 8–11, inner = pins 2–5):
+```json
+["stepper1:B1-", "uno:8",  "black", []],
+["stepper1:B1+", "uno:9",  "green", []],
+["stepper1:A1+", "uno:10", "red",   []],
+["stepper1:A1-", "uno:11", "blue",  []],
+["stepper1:B2-", "uno:2",  "black", []],
+["stepper1:B2+", "uno:3",  "green", []],
+["stepper1:A2+", "uno:4",  "red",   []],
+["stepper1:A2-", "uno:5",  "blue",  []]
+```
+
+```json
+{ "type": "wokwi-biaxial-stepper", "id": "stepper1", "top": 0, "left": 200,
+  "attrs": { "outerHandShape": "arrow", "innerHandShape": "arrow", "outerHandColor": "gold", "innerHandColor": "silver" } }
+```
+
+---
+
 ### wokwi-a4988 + wokwi-stepper-motor
 
 Always used together. The A4988 drives the stepper motor.
