@@ -69,19 +69,47 @@ Floating power/ground nodes — clean up power rail wiring without routing long 
 
 ### wokwi-dip-switch-8 (8-position DIP switch)
 
-8 independent SPST switches. Each switch `n`: pins `na` and `nb` connected when ON.
+8 independent SPST switches. Each switch `n`: pins `na` (side A) and `nb` (side B) connected when ON. Toggle with keyboard keys `1`–`8` while focused.
 
-| Pins | Role |
-|---|---|
-| `1a`–`8a` | Side A of each switch |
-| `1b`–`8b` | Side B of each switch |
+**Typical wiring — chain one side to GND, other side to MCU inputs:**
+```json
+["uno:GND.1", "sw1:1b", "black", []],
+["sw1:2b",    "sw1:1b", "black", []],
+["sw1:3b",    "sw1:2b", "black", []],
+["sw1:8b",    "sw1:7b", "black", []],
+["sw1:1a", "uno:7", "green", []],
+["sw1:2a", "uno:6", "green", []],
+["sw1:8a", "uno:0", "green", []]
+```
+
+Use `INPUT_PULLUP` on MCU pins when `nb` side is GND. Or chain `na` to VCC and use `INPUT` on `nb`.
 
 ```json
 { "type": "wokwi-dip-switch-8", "id": "sw1", "top": 0, "left": 0, "attrs": {} }
 ```
+
+---
+
+### wokwi-led-bar-graph (10-segment LED bar)
+
+10 individual LEDs. Each LED `n` has anode `An` and cathode `Cn`.
+
+| Pins | Role |
+|---|---|
+| `A1`–`A10` | Anodes — typically chained together to VCC |
+| `C1`–`C10` | Cathodes — connect to MCU outputs or switch/driver |
+
+Attr: `"color"` sets color pattern (e.g. `"BCYR"` = Blue/Cyan/Yellow/Red cycling across segments).
+
+Chain all anodes to VCC, drive cathodes LOW to light each LED:
 ```json
-["pwr1:VCC", "sw1:1a", "red",   []],
-["sw1:1b",   "esp:D2", "green", []]
+{ "type": "wokwi-led-bar-graph", "id": "bar1", "top": 0, "left": 200, "rotate": 90, "attrs": { "color": "BCYR" } }
+```
+```json
+["uno:5V",   "bar1:A10", "red",   []],
+["bar1:A10", "bar1:A9",  "red",   []],
+["bar1:C10", "uno:2",    "green", []],
+["bar1:C9",  "uno:3",    "green", []]
 ```
 
 ---
