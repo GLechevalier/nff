@@ -4,7 +4,7 @@
 
 #define LED_PIN    2
 #define BAUD_RATE  115200
-#define INTERVAL   500   // ms per blink half-cycle
+#define INTERVAL   250   // ms per blink half-cycle
 
 void setup() {
   Serial.begin(BAUD_RATE);

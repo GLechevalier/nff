@@ -22,12 +22,11 @@ Claude: [writes sketch] → [updates diagram.json] → [nff flash --sim] → [nf
 pip install nff
 ```
 
+`esptool` is bundled — no separate install needed.
+
 ### 2. Install external tools
 
 ```bash
-# arduino-cli (required for all workflows)
-# → https://arduino.github.io/arduino-cli/latest/installation/
-
 # wokwi-cli (required for simulation only)
 # → https://github.com/wokwi/wokwi-cli/releases
 # Get a free CI token at https://wokwi.com/dashboard/ci
@@ -38,18 +37,27 @@ arduino-cli core install arduino:avr
 arduino-cli core install esp8266:esp8266
 ```
 
+> **arduino-cli** is auto-installed by `nff init` if it is not already on your PATH. You can also install it manually from https://arduino.github.io/arduino-cli.
+
 ### 3. Real hardware — plug in your board and run init
 
 ```bash
 nff init
 ```
 
-Detects your board by USB vendor/product ID and registers the nff MCP server.
+This single command does everything:
+- Detects your board by USB vendor/product ID
+- Writes `~/.nff/config.json` and a `CLAUDE.md` in the current directory
+- Registers the nff MCP server (`claude mcp add nff nff mcp`)
+- Installs the `/nff` and `/wokwi-diagram` Claude Code skills globally
 
 ```
   ✓ Found: ESP32 (CP210x) on COM10
   ✓ Config written to ~/.nff/config.json
-  ✓ MCP config written to ~/.claude/claude_desktop_config.json
+  ✓ CLAUDE.md written to ./CLAUDE.md
+  ✓ Claude skills installed: /nff, /wokwi-diagram
+  ✓ Registered with Claude Code CLI (claude mcp add nff nff mcp)
+  ✓ Claude Desktop config updated
 ```
 
 ### 4. Simulation only — no board needed
@@ -82,7 +90,7 @@ nff doctor
 |---|---|
 | `nff init` | Detect board, write config, register MCP server |
 | `nff flash <file>` | Compile and upload a sketch or sketch directory |
-| `nff monitor` | Interactive serial monitor (Ctrl+C to exit) |
+| `nff monitor` | Stream serial output (Ctrl+C to exit, or `--timeout SECONDS`) |
 | `nff doctor` | Check all dependencies and configuration |
 | `nff mcp` | Start the MCP server (called automatically by Claude Code) |
 
@@ -91,6 +99,7 @@ nff flash sketches/blink
 nff flash sketches/blink --board esp32:esp32:esp32 --port COM3
 nff flash sketches/blink --manual-reset    # for boards with broken auto-reset
 nff monitor --port COM10 --baud 115200
+nff monitor --port COM10 --baud 115200 --timeout 15   # stop after 15 seconds
 ```
 
 ### Wokwi simulation
@@ -240,11 +249,23 @@ Board not listed? Open a PR — adding one is [two lines of code](CONTRIBUTING.m
 
 ---
 
-## Claude Skill
+## Claude Code Skills
 
-This project ships a `/nff` Claude Code skill at `.claude/commands/nff.md`.
+nff ships two Claude Code skills that are **automatically installed to `~/.claude/commands/` when you run `nff init`**, making them available globally in every Claude Code session.
 
-Type `/nff` in any Claude Code session inside this project to load the full pipeline reference — simulation workflow, hardware workflow, component wiring, servo calibration, and debugging checklist — directly into context.
+| Skill | When to use |
+|---|---|
+| `/nff` | Full pipeline reference — hardware and simulation workflows, sketch-first rules, servo calibration, debugging checklist |
+| `/wokwi-diagram` | `diagram.json` authoring reference — component types, pin names, wiring patterns for LEDs, buttons, servos, sensors |
+
+Type the skill name in any Claude Code prompt to load the reference into context:
+
+```
+/nff
+/wokwi-diagram
+```
+
+The skill files are also available in the repository at `.claude/commands/` for project-level use, and are bundled inside the `nff` package at `nff/skills/` so they ship with every `pip install nff`.
 
 ---
 

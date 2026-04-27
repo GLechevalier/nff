@@ -368,8 +368,9 @@ def stream_compile(sketch_dir: pathlib.Path, fqbn: str) -> ProcessStream:
         ToolchainError: If arduino-cli is missing or fails to start.
     """
     exe = _require_arduino_cli()
-    return _stream_process([exe, "compile", "--fqbn", fqbn, str(sketch_dir), "--build-path", str(elf_path_for(sketch_dir, fqbn))])
-
+    build_path = elf_path_for(sketch_dir, fqbn).parent
+    build_path.mkdir(parents=True, exist_ok=True)
+    return _stream_process([exe, "compile", "--fqbn", fqbn, "--build-path", str(build_path), str(sketch_dir)])
 
 def stream_upload(sketch_dir: pathlib.Path, fqbn: str, port: str) -> ProcessStream:
     """Return a :class:`ProcessStream` for an upload run (for CLI display).
@@ -387,10 +388,10 @@ def stream_upload(sketch_dir: pathlib.Path, fqbn: str, port: str) -> ProcessStre
         ToolchainError: If arduino-cli is missing or fails to start.
     """
     exe = _require_arduino_cli()
+    input_dir = elf_path_for(sketch_dir, fqbn).parent
     return _stream_process(
-        [exe, "upload", "--fqbn", fqbn, "--port", port, str(sketch_dir)]
+        [exe, "upload", "--fqbn", fqbn, "--port", port, "--input-dir", str(input_dir), str(sketch_dir)]
     )
-
 
 # ---------------------------------------------------------------------------
 # Combined flash (write + compile + upload) — called by the MCP tool

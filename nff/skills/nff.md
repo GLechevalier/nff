@@ -206,15 +206,13 @@ Hold the BOOT button when prompted, release after upload starts.
 ```bash
 nff monitor
 nff monitor --port COM3 --baud 115200
-nff monitor --port COM3 --baud 115200 --timeout 15
 ```
 
-Options:
-- **`--port PORT`** — serial port (e.g. `COM3`, `/dev/ttyUSB0`). Defaults to config.
-- **`--baud INTEGER`** — baud rate. Must match `Serial.begin()` in the sketch. Defaults to config (9600).
-- **`--timeout SECONDS`** — stop after N **seconds** (integer). Omit to run indefinitely (Ctrl+C to exit). Note: this is seconds, not milliseconds.
+Ctrl+C to exit.
 
-To capture output from a one-shot sketch (e.g. a scan that runs in `setup()` then stops): reset the device first with `mcp__nff__reset_device`, then immediately run `nff monitor --timeout <N>`.
+**Baud rate:** always match `--baud` (and the value in `~/.nff/config.json`) to the rate passed to
+`Serial.begin()` in the sketch. Mismatched baud rates cause garbled or silent output and break
+all serial debugging.
 
 ---
 

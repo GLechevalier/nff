@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nff"
-version = "0.2.0"
+version = "0.2.6"
 description = "Claude Code IoT Bridge — connect Claude to hardware via USB"
 readme = "README.md"
 license = "MIT"
@@ -54,6 +54,9 @@ testpaths = ["tests"]
 where = ["."]
 include = ["nff*"]
 exclude = ["tests*", "scripts*"]
+
+[tool.setuptools.package-data]
+"nff" = ["skills/*.md"]
 
 [tool.black]
 line-length = 100
