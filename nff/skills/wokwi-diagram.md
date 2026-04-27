@@ -159,6 +159,38 @@ Same as Uno plus `AREF`. Power: `5V`, `3V3`, `GND.1`, `GND.2`.
 
 ---
 
+### wokwi-attiny85
+
+| Pin group | Names |
+|---|---|
+| GPIO | `PB0`–`PB4` |
+| Power | `VCC`, `GND` |
+| Other | `RESET` (PB5) |
+
+```json
+{ "type": "wokwi-attiny85", "id": "tiny", "top": 0, "left": 0, "attrs": {} }
+```
+
+---
+
+### wokwi-pi-pico (Raspberry Pi Pico)
+
+| Pin group | Names |
+|---|---|
+| GPIO | `GP0`–`GP28` |
+| UART default | `GP0` (TX → `$serialMonitor:RX`), `GP1` (RX ← `$serialMonitor:TX`) |
+| Power | `3V3`, `VSYS`, `VBUS`, `GND.1`–`GND.8` |
+
+Attrs: `"env": "arduino-community"` to use Arduino framework instead of MicroPython.
+
+Serial monitor:
+```json
+["pico:GP0", "$serialMonitor:RX", "", []],
+["pico:GP1", "$serialMonitor:TX", "", []]
+```
+
+---
+
 ### board-st-nucleo-l031k6 (STM32 Nucleo-32)
 
 ARM Cortex-M0+, 32 MHz, 32 KB Flash, 8 KB RAM, 1 KB EEPROM.
@@ -323,7 +355,7 @@ Add `"rotate": 270` for vertical orientation. Use an ADC-capable pin for `SIG`.
 ```
 
 ```json
-{ "type": "wokwi-pushbutton", "id": "btn1", "top": 100, "left": 200, "attrs": { "color": "blue" } }
+{ "type": "wokwi-pushbutton", "id": "btn1", "top": 100, "left": 200, "attrs": { "color": "blue", "label": "SET" } }
 ```
 
 ---
@@ -344,6 +376,92 @@ Add `"rotate": 270` for vertical orientation. Use an ADC-capable pin for `SIG`.
 ["esp:D18",    "srv1:PWM", "orange", []],
 ["esp:3V3",    "srv1:V+",  "red",    []],
 ["esp:GND.1",  "srv1:GND", "black",  []]
+```
+
+---
+
+### wokwi-7segment (7-segment LED display)
+
+| Pin | Role |
+|---|---|
+| `A`–`G` | Segments (Top, Top-R, Bottom-R, Bottom, Bottom-L, Top-L, Middle) |
+| `DP` | Decimal point |
+| `COM` | Common pin — single-digit only |
+| `DIG1`–`DIG4` | Digit select — multi-digit (replaces `COM`) |
+| `CLN` | Colon — only when `colon` attr is set |
+
+| Attr | Default | Values |
+|---|---|---|
+| `common` | `"anode"` | `"anode"` or `"cathode"` |
+| `digits` | `"1"` | `"1"` `"2"` `"3"` `"4"` |
+| `colon` | `""` | `"1"` or `"true"` to enable colon between digit 2 and 3 |
+| `color` | `"red"` | Any CSS color e.g. `"green"`, `"#0f0"` |
+
+**Default anode mode:** `DIG*` pins go HIGH to select a digit; segment pins `A`–`G` go LOW to light a segment. Each segment needs a ~180Ω resistor in series.
+
+Single digit (anode, COM → 5V, segments via resistors):
+```json
+{ "type": "wokwi-7segment", "id": "seg1", "top": 0, "left": 200, "attrs": { "digits": "1", "common": "anode" } }
+```
+```json
+["seg1:COM", "uno:5V",    "red",   []],
+["seg1:A",   "r1:2",      "green", []],
+["r1:1",     "uno:D6",    "green", []]
+```
+
+4-digit clock display (anode, DIG1–4 → MCU, CLN enabled):
+```json
+{ "type": "wokwi-7segment", "id": "seg1", "top": 0, "left": 200, "attrs": { "digits": "4", "colon": "1", "common": "anode" } }
+```
+```json
+["seg1:DIG1", "uno:D2",  "blue",   []],
+["seg1:DIG2", "uno:D3",  "orange", []],
+["seg1:DIG3", "uno:D4",  "red",    []],
+["seg1:DIG4", "uno:D5",  "purple", []],
+["seg1:A",    "uno:D6",  "gray",   []],
+["seg1:B",    "uno:D7",  "green",  []],
+["seg1:C",    "uno:D8",  "blue",   []],
+["seg1:D",    "uno:D9",  "orange", []],
+["seg1:E",    "uno:D10", "red",    []],
+["seg1:F",    "uno:D11", "purple", []],
+["seg1:G",    "uno:D12", "gray",   []],
+["seg1:CLN",  "uno:D13", "cyan",   []]
+```
+
+> Using a 74HC595 shift register to drive segments saves 5 MCU pins — see `wokwi-74hc595`.
+> For Arduino: `SevSeg` library handles multiplexing.
+
+---
+
+### wokwi-buzzer
+
+| Pin | Role |
+|---|---|
+| `1` | Ground side |
+| `2` | Signal (connect to MCU GPIO) |
+
+```json
+{ "type": "wokwi-buzzer", "id": "bz1", "top": 100, "left": 200, "attrs": {} }
+```
+```json
+["bz1:1", "esp:GND.1", "black",  []],
+["bz1:2", "esp:D18",   "orange", []]
+```
+
+---
+
+### wokwi-ds1307 (RTC — Real Time Clock)
+
+I2C RTC. Pins: `GND`, `5V`, `SDA`, `SCL`. Arduino Uno default I2C: SDA = A4, SCL = A5.
+
+```json
+{ "type": "wokwi-ds1307", "id": "rtc1", "top": 100, "left": 200, "attrs": {} }
+```
+```json
+["rtc1:GND", "uno:GND.1", "black", []],
+["rtc1:5V",  "uno:5V",    "red",   []],
+["rtc1:SDA", "uno:A4",    "blue",  []],
+["rtc1:SCL", "uno:A5",    "gold",  []]
 ```
 
 ---
