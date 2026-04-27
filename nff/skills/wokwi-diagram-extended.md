@@ -31,3 +31,77 @@ Load alongside `/wokwi-diagram` for full coverage.
 Use Arduino `tone(pin, frequency, duration)` to drive the buzzer. Pin 2 connects to the tone pin.
 
 ---
+
+### wokwi-clock-generator
+
+Outputs a configurable clock signal. Single pin: `CLK` (output only).
+
+| Attr | Default | Description |
+|---|---|---|
+| `frequency` | `"10k"` | Hz with `k`/`m` suffix: `"10k"` = 10 kHz, `"1.3m"` = 1.3 MHz, `"1"` = 1 Hz. Numeric strings also work: `"10000"`. |
+
+> Frequencies above 100 kHz slow down the simulation.
+
+```json
+{ "type": "wokwi-clock-generator", "id": "clk1", "top": 0, "left": 0, "attrs": { "frequency": "10k" } }
+```
+```json
+["clk1:CLK", "esp:D2", "blue", []]
+```
+
+---
+
+### wokwi-vcc / wokwi-gnd (standalone power symbols)
+
+Floating power/ground nodes — clean up power rail wiring without routing long wires.
+
+| Type | Pin |
+|---|---|
+| `wokwi-vcc` | `VCC` |
+| `wokwi-gnd` | `GND` |
+
+```json
+{ "type": "wokwi-vcc", "id": "pwr1", "top": -100, "left": 0, "attrs": {} },
+{ "type": "wokwi-gnd", "id": "gnd1", "top":  100, "left": 0, "attrs": {} }
+```
+
+---
+
+### wokwi-dip-switch-8 (8-position DIP switch)
+
+8 independent SPST switches. Each switch `n`: pins `na` and `nb` connected when ON.
+
+| Pins | Role |
+|---|---|
+| `1a`–`8a` | Side A of each switch |
+| `1b`–`8b` | Side B of each switch |
+
+```json
+{ "type": "wokwi-dip-switch-8", "id": "sw1", "top": 0, "left": 0, "attrs": {} }
+```
+```json
+["pwr1:VCC", "sw1:1a", "red",   []],
+["sw1:1b",   "esp:D2", "green", []]
+```
+
+---
+
+### wokwi-gate-not / wokwi-gate-and / wokwi-gate-or (logic gates)
+
+| Pin | Role |
+|---|---|
+| `IN` | Input (all gates) |
+| `IN2` | Second input (AND, OR, XOR, NAND, NOR — not on NOT) |
+| `OUT` | Output |
+
+Available types: `wokwi-gate-not`, `wokwi-gate-and`, `wokwi-gate-or`, `wokwi-gate-xor`, `wokwi-gate-nand`, `wokwi-gate-nor`.
+
+```json
+{ "type": "wokwi-gate-not", "id": "not1", "top": 0, "left": 200, "attrs": {} }
+```
+```json
+["not1:IN",  "esp:D2", "green", []],
+["not1:OUT", "esp:D3", "blue",  []]
+```
+
+---

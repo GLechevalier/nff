@@ -694,9 +694,23 @@ ESP32 wiring (I2C default D21/D22):
 
 | Pin | Role |
 |---|---|
-| `VCC` | Power |
+| `VCC` | Power (3.3V or 5V) |
 | `GND` | Ground |
-| `SDA` | Data (connect to GPIO, no extra resistor needed in Wokwi) |
+| `SDA` | Data — no pull-up resistor needed in Wokwi |
+| `NC` | Not connected |
+
+| Attr | Default |
+|---|---|
+| `temperature` | `"24"` (°C) |
+| `humidity` | `"40"` (%) |
+
+> On ESP32 use the **"DHT sensor library for ESPx"** library — generic DHT22 libraries are unreliable on ESP32.
+
+```json
+["dht1:VCC", "esp:3V3",   "red",   []],
+["dht1:GND", "esp:GND.1", "black", []],
+["dht1:SDA", "esp:D15",   "green", []]
+```
 
 ---
 
