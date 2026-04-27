@@ -213,7 +213,7 @@ def test_run_calls_wokwi_cli_run_subcommand(tmp_path):
     with patch("subprocess.run", return_value=_make_completed_process()) as mock_proc:
         runner.run(project_dir=tmp_path, timeout_ms=5000)
     args = mock_proc.call_args[0][0]
-    assert args[0] == toolchain.find_wokwi_cli()
+    assert str(args[0]) == str(toolchain.find_wokwi_cli())
     assert args[1] == "run"
 
 
