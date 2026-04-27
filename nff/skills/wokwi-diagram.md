@@ -276,6 +276,32 @@ Default I2C on ESP32: `SCL = D22`, `SDA = D21`.
 
 ---
 
+### board-grove-oled-sh1107 (128×128 OLED)
+
+Monochrome 128×128 I2C OLED. **SPI not supported.** Note the `.1` suffixes on `SCL` and `GND`.
+
+| Pin | Role |
+|---|---|
+| `SCL.1` | I2C clock — **NOT `SCL`** |
+| `SDA` | I2C data |
+| `VCC` | Power (3.3V) |
+| `GND.1` | Ground — **NOT `GND`** |
+
+Default I2C on ESP32 (`board-esp32-devkit-c-v4`): SCL = `22`, SDA = `21`.
+
+```json
+{ "type": "board-grove-oled-sh1107", "id": "oled1", "top": 100, "left": 200, "attrs": {} }
+```
+
+```json
+["oled1:SCL.1", "esp:22",    "green", []],
+["oled1:SDA",   "esp:21",    "blue",  []],
+["oled1:VCC",   "esp:3V3",   "red",   []],
+["oled1:GND.1", "esp:GND.1", "black", []]
+```
+
+---
+
 ### wokwi-hc-sr04 (ultrasonic)
 
 | Pin | Role |
