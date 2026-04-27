@@ -146,12 +146,18 @@ I2C (e.g. LCD, BMP180):
 
 ### wokwi-arduino-uno
 
+Pin naming: **numeric without prefix** (`2`, `13`) — NOT `D2`/`D13`.
+
 | Pin group | Names |
 |---|---|
-| Digital | `D0`–`D13` |
+| Digital | `0`–`13` |
 | Analog | `A0`–`A5` |
 | Power | `5V`, `3V3`, `GND.1`, `GND.2` |
+| I2C | SDA = `A4`, SCL = `A5` |
+| SPI | MISO = `12`, MOSI = `11`, SCK = `13` |
 | Other | `AREF`, `IOREF`, `RESET` |
+
+Onboard LED: pin `13` = `LED_BUILTIN`.
 
 ### wokwi-arduino-nano
 
