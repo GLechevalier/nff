@@ -263,16 +263,35 @@ Add `"rotate": 90` to orient vertically.
 
 ---
 
-### wokwi-ssd1306
+### wokwi-ssd1306 / board-ssd1306 (128×64 OLED)
 
-| Pin | Role |
-|---|---|
-| `VCC` | Power (3.3V) |
-| `GND` | Ground |
-| `SCL` | I2C clock |
-| `SDA` | I2C data |
+Monochrome 128×64 I2C OLED. Both type names are valid; `board-ssd1306` is the current name.
 
-Default I2C on ESP32: `SCL = D22`, `SDA = D21`.
+| Pin | Role | Arduino Uno |
+|---|---|---|
+| `VCC` | Power (3.3V or 5V) | 5V |
+| `GND` | Ground | GND |
+| `SCL` | I2C clock | A5 |
+| `SDA` | I2C data | A4 |
+
+| Attr | Default | Description |
+|---|---|---|
+| `i2cAddress` | `"0x3c"` | I2C address — use `"0x3d"` for modules with alternate address |
+
+Default I2C on ESP32 (`wokwi-esp32-devkit-v1`): `SCL = D22`, `SDA = D21`.
+
+Compatible libraries (all available on Wokwi): `Adafruit SSD1306`, `U8g2`, `U8glib`, `lcdgfx`, `ssd1306`, `SSD1306Ascii`, `Tiny4kOLED` (ATtiny85).
+
+```json
+{ "type": "board-ssd1306", "id": "oled1", "top": 100, "left": 200, "attrs": { "i2cAddress": "0x3c" } }
+```
+
+```json
+["oled1:SCL", "esp:D22",   "purple", []],
+["oled1:SDA", "esp:D21",   "blue",   []],
+["oled1:VCC", "esp:3V3",   "red",    []],
+["oled1:GND", "esp:GND.1", "black",  []]
+```
 
 ---
 
