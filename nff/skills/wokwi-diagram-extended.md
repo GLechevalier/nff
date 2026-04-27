@@ -667,3 +667,53 @@ Attr: `"chain": "2"` chains N matrices side-by-side (e.g. `"2"` = 16×8).
 ```
 
 ---
+
+### wokwi-ds18b20 (1-Wire temperature sensor)
+
+Digital temperature sensor, -55°C to 125°C. Uses 1-Wire protocol — multiple sensors can share the same data pin, each addressed by unique `deviceID`.
+
+| Pin | Role |
+|---|---|
+| `VCC` | Power (3.3V or 5V) |
+| `DQ` | 1-Wire data line — **requires 4.7 kΩ pull-up to VCC** |
+| `GND` | Ground |
+
+| Attr | Default | Description |
+|---|---|---|
+| `temperature` | `"22"` | Initial temperature in °C (-55 to 125) |
+| `deviceID` | `"010203040506"` | 12-char hex 1-Wire address — must be unique per bus |
+| `familyCode` | `"28"` | 1-Wire family code |
+
+Library: `OneWire` + `DallasTemperature`. Call `sensors.requestTemperatures()` then `sensors.getTempCByIndex(0)`.
+
+> `DallasTemperature` cannot read exactly -55°C (reserved sentinel for disconnected sensor). Use `OneWire` directly if you need that exact value.
+
+**Single sensor (Arduino Uno, DQ on pin 12, 4.7 kΩ pull-up):**
+```json
+{ "type": "wokwi-ds18b20", "id": "temp1", "top": 0, "left": 200, "attrs": { "temperature": "23.5" } },
+{ "type": "wokwi-resistor", "id": "r1", "top": -50, "left": 150, "attrs": { "value": "4700" } }
+```
+```json
+["temp1:VCC", "uno:5V",    "red",   []],
+["temp1:GND", "uno:GND.1", "black", []],
+["temp1:DQ",  "uno:12",    "green", []],
+["r1:1",      "uno:5V",    "red",   []],
+["r1:2",      "temp1:DQ",  "green", []]
+```
+
+**Multiple sensors (same bus — chain VCC/GND, share DQ and pull-up):**
+```json
+{ "type": "wokwi-ds18b20", "id": "temp1", "top": 0, "left": 100, "attrs": { "deviceID": "111111111111" } },
+{ "type": "wokwi-ds18b20", "id": "temp2", "top": 0, "left": 150, "attrs": { "deviceID": "222222222222" } },
+{ "type": "wokwi-ds18b20", "id": "temp3", "top": 0, "left": 200, "attrs": { "deviceID": "333333333333" } }
+```
+```json
+["temp1:VCC", "temp2:VCC", "red",   []],
+["temp2:VCC", "temp3:VCC", "red",   []],
+["temp1:GND", "temp2:GND", "black", []],
+["temp2:GND", "temp3:GND", "black", []],
+["temp1:DQ",  "temp2:DQ",  "green", []],
+["temp2:DQ",  "temp3:DQ",  "green", []]
+```
+
+---
