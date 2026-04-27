@@ -12,6 +12,23 @@ Use this skill whenever you need to write, compile, simulate, or flash a sketch.
 - For ESP32 servo control use `ledcAttach` / `ledcWrite` (built-in LEDC, no library needed).
 - The working directory for all `nff` commands is the project root (where `wokwi.toml` lives).
 
+### Sketch-First Rule (mandatory — no exceptions)
+
+**Before flashing anything, the sketch must exist as a real file on disk.**
+
+1. Check whether `sketches/` exists in the project root. If not, create it.
+2. Write the sketch to `sketches/<name>/<name>.ino` using the Write tool (the folder name must match the `.ino` filename — arduino-cli requirement).
+3. Only then flash the path to that file.
+
+**Never pass raw code strings to MCP tools.** The `code` parameter on `mcp__nff__flash` and `mcp__nff__wokwi_flash` must not be used. Those tools exist for programmatic callers; Claude Code must always write the file first and pass the sketch directory path instead.
+
+```
+WRONG: mcp__nff__flash(code="void setup()...")
+RIGHT: Write file → nff flash sketches/<name>
+```
+
+When iterating on a sketch, edit the `.ino` file with the Edit tool, then re-flash the same path. The file is the source of truth.
+
 ---
 
 ## Prerequisites Check
@@ -28,9 +45,17 @@ This verifies: arduino-cli, wokwi-cli, Wokwi token, connected device.
 
 ## Full Simulation Pipeline (no hardware)
 
-### Step 1 — Write the sketch
+### Step 1 — Write the sketch to disk
 
-Place it in `sketches/<name>/<name>.ino`. The folder name must match the `.ino` filename (arduino-cli requirement).
+Check that `sketches/` exists in the project root; create it if not.
+Write the sketch using the Write tool:
+
+```
+sketches/<name>/<name>.ino
+```
+
+The folder name must match the `.ino` filename (arduino-cli requirement).
+Do not flash until this file exists on disk. When iterating, use the Edit tool on this file and re-flash — never overwrite with a new inline string.
 
 ### Step 2 — Initialize Wokwi project (first time only)
 
@@ -142,6 +167,12 @@ Always declare `minAngle: "-90"` and `maxAngle: "90"` in `diagram.json` for corr
 
 ## Full Real Hardware Pipeline
 
+### Step 0 — Write the sketch to disk
+
+Before touching the device, follow the Sketch-First Rule:
+check for `sketches/` in the project root, create it if missing, and write
+`sketches/<name>/<name>.ino` with the Write tool. Only proceed once the file exists.
+
 ### Step 1 — Detect device
 
 ```bash
@@ -175,9 +206,15 @@ Hold the BOOT button when prompted, release after upload starts.
 ```bash
 nff monitor
 nff monitor --port COM3 --baud 115200
+nff monitor --port COM3 --baud 115200 --timeout 15
 ```
 
-Ctrl+C to exit.
+Options:
+- **`--port PORT`** — serial port (e.g. `COM3`, `/dev/ttyUSB0`). Defaults to config.
+- **`--baud INTEGER`** — baud rate. Must match `Serial.begin()` in the sketch. Defaults to config (9600).
+- **`--timeout SECONDS`** — stop after N **seconds** (integer). Omit to run indefinitely (Ctrl+C to exit). Note: this is seconds, not milliseconds.
+
+To capture output from a one-shot sketch (e.g. a scan that runs in `setup()` then stops): reset the device first with `mcp__nff__reset_device`, then immediately run `nff monitor --timeout <N>`.
 
 ---
 
