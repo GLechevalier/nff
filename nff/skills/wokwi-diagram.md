@@ -12,14 +12,73 @@ It is the ground-truth pin reference for all Wokwi components.
   "version": 1,
   "author": "nff",
   "editor": "wokwi",
-  "parts": [ ... ],
-  "connections": [ ... ]
+  "parts": [],
+  "connections": []
 }
 ```
 
+- `"version"` is always `1`
+- `"author"` is the creator name
+- `"editor"` is always `"wokwi"`
+- Optional `"serialMonitor"` section configures the Serial Monitor
+
+### Parts
+
+Each part object:
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | string | yes | Unique identifier (e.g. `"led1"`) |
+| `type` | string | yes | Component type (e.g. `"wokwi-led"`) |
+| `left` | number | no | X canvas coordinate (pixels) |
+| `top` | number | no | Y canvas coordinate (pixels) |
+| `attrs` | object | no | Component-specific attributes |
+| `rotate` | number | no | Rotation in degrees (e.g. `90`) |
+| `hide` | boolean | no | If `true`, part is invisible |
+
+> Every `id` must be unique — duplicate IDs break simulation.
+
+### Connections
+
 Each connection: `["partId:pin", "partId:pin", "color", [waypoints]]`
-- `color`: any CSS color string, or `""` for default
-- `waypoints`: `[]` for auto-route, or relative offsets like `["h30", "v-20"]`
+- `color`: any CSS color string, or `""` to hide the wire
+- `waypoints`: `[]` for auto-route, or wire placement instructions
+
+### Wire Placement Mini-Language
+
+Instructions control how the wire is drawn from source to target:
+
+| Instruction | Effect |
+|---|---|
+| `"v<N>"` | Move N pixels vertically (positive = down) |
+| `"h<N>"` | Move N pixels horizontally (positive = right) |
+| `"*"` | Separator: instructions before apply to source pin, instructions after apply to target pin (in reverse order) |
+
+Example: `["v10", "h5", "*", "v-15", "h10"]` — from source: down 10, right 5; from target: right 10, up 15; simulator bridges the gap.
+
+### Supported MCUs
+
+| Type | Board |
+|---|---|
+| `wokwi-attiny85` | ATtiny85 |
+| `wokwi-arduino-nano` | Arduino Nano |
+| `wokwi-arduino-mega` | Arduino Mega 2560 |
+| `wokwi-arduino-uno` | Arduino Uno R3 |
+| `wokwi-pi-pico` | Raspberry Pi Pico |
+| `board-esp32-devkit-c-v4` | ESP32 official devkit |
+| `wokwi-esp32-devkit-v1` | ESP32 unofficial devkit |
+| `board-esp32-c3-devkitm-1` | ESP32-C3 |
+| `board-esp32-c6-devkitc-1` | ESP32-C6 |
+| `board-esp32-h2-devkitm-1` | ESP32-H2 |
+| `board-esp32-s2-devkitm-1` | ESP32-S2 |
+| `board-esp32-s3-devkitc-1` | ESP32-S3 |
+| `board-esp32-p4-preview` | ESP32-P4 |
+| `board-xiao-esp32-c3` | XIAO ESP32-C3 |
+| `board-xiao-esp32-c6` | XIAO ESP32-C6 |
+| `board-xiao-esp32-s3` | XIAO ESP32-S3 |
+| `board-st-nucleo-c031c6` | STM32 Nucleo-64 STM32C031C6 |
+| `board-st-nucleo-l031k6` | STM32 Nucleo-32 STM32L031K6 |
+| `board-franzininho-wifi` | ESP32-S2 (Franzininho WiFi) |
 
 ---
 
