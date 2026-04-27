@@ -355,8 +355,60 @@ Add `"rotate": 270` for vertical orientation. Use an ADC-capable pin for `SIG`.
 ```
 
 ```json
-{ "type": "wokwi-pushbutton", "id": "btn1", "top": 100, "left": 200, "attrs": { "color": "blue", "label": "SET" } }
+{ "type": "wokwi-pushbutton", "id": "btn1", "top": 100, "left": 200, "attrs": { "color": "blue", "label": "SET", "bounce": "0" } }
 ```
+
+Attrs: `"label"` sets a display label. `"bounce": "0"` disables contact bounce simulation (useful for clean step-by-step testing).
+
+---
+
+### wokwi-a4988 + wokwi-stepper-motor
+
+Always used together. The A4988 drives the stepper motor.
+
+**wokwi-a4988 pins:**
+
+| Pin | Role | Default |
+|---|---|---|
+| `ENABLE` | Enable, active low | LOW (enabled) |
+| `SLEEP` | Sleep, active low | HIGH (awake) |
+| `RESET` | Reset, active low | floating — **must connect to SLEEP** |
+| `MS1`/`MS2`/`MS3` | Microstepping select | all LOW = full step |
+| `STEP` | Step pulse input (MCU output) | — |
+| `DIR` | Direction: HIGH = CW, LOW = CCW | — |
+| `VDD` | Logic power (3.3V or 5V) | — |
+| `GND` | Ground | — |
+| `1A` | Motor coil B+ | — |
+| `1B` | Motor coil B- | — |
+| `2A` | Motor coil A+ | — |
+| `2B` | Motor coil A- | — |
+| `VMOT` | Motor power (not simulated) | — |
+
+Microstepping: MS1=0,MS2=0,MS3=0 → full (200 steps/rev) · MS1=1 → half · MS2=1 → 1/4 · MS1+MS2=1 → 1/8 · all=1 → 1/16.
+
+> Modes 1/4, 1/8, 1/16 are partially supported: step count is correct but angle updates every half step only.
+
+**wokwi-stepper-motor attrs:** `"display": "angle"` shows current angle; `"arrow": "green"` shows a colored direction arrow.
+
+```json
+{ "type": "wokwi-a4988",      "id": "drv1",     "top": 0,   "left": 200, "attrs": {} },
+{ "type": "wokwi-stepper-motor","id": "stepper1","top": -150,"left": 150, "attrs": { "display": "angle" } }
+```
+
+**Wiring (RESET → SLEEP shortcut, STEP/DIR to MCU):**
+```json
+["drv1:SLEEP",  "drv1:RESET",   "green",  []],
+["drv1:STEP",   "uno:D2",       "purple", []],
+["drv1:DIR",    "uno:D3",       "orange", []],
+["drv1:VDD",    "uno:5V",       "red",    []],
+["drv1:GND",    "uno:GND.1",    "black",  []],
+["drv1:1B",     "stepper1:B-",  "black",  []],
+["drv1:1A",     "stepper1:B+",  "green",  []],
+["drv1:2A",     "stepper1:A+",  "blue",   []],
+["drv1:2B",     "stepper1:A-",  "red",    []]
+```
+
+**Multi-driver chains:** SLEEP→RESET per driver; share ENABLE across drivers; each driver needs its own STEP/DIR pins.
 
 ---
 
@@ -731,8 +783,10 @@ Typical use (HIGH/LOW input to MCU):
 Visual text label — no electrical pins. Use for annotating diagrams.
 
 ```json
-{ "type": "wokwi-text", "id": "lbl1", "top": 0, "left": 200, "attrs": { "text": "Channel 0" } }
+{ "type": "wokwi-text", "id": "lbl1", "top": 0, "left": 200, "attrs": { "text": "Line 1\nLine 2" } }
 ```
+
+`\n` in the `text` attr creates multi-line labels.
 
 ---
 
