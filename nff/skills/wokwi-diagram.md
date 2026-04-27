@@ -20,7 +20,11 @@ It is the ground-truth pin reference for all Wokwi components.
 - `"version"` is always `1`
 - `"author"` is the creator name
 - `"editor"` is always `"wokwi"`
-- Optional `"serialMonitor"` section configures the Serial Monitor
+- Optional `"serialMonitor"` section configures the Serial Monitor:
+  ```json
+  "serialMonitor": { "display": "plotter", "newline": "lf", "convertEol": false }
+  ```
+  `display`: `"terminal"` (default) or `"plotter"`. `newline`: `"lf"`, `"crlf"`, `"cr"`, or `"none"`.
 
 ### Parts
 
@@ -184,6 +188,34 @@ Not simulated: DMA, IWDG, RTC, PWR, Comparator, LPTIM, LPUART.
 
 ---
 
+### board-stm32-bluepill (STM32 Blue Pill)
+
+ARM Cortex-M3, 72 MHz, 64 KB Flash, 20 KB RAM.
+
+Onboard LED: `PC13` — lit when driven HIGH.
+
+Pin naming: short-form without port letter — `A0` (not `PA0`), `B6` (not `PB6`), `C13` (not `PC13`).
+Power: `3V3.1`, `3V3.2`, `GND.1`, `GND.2` (numbered suffixes).
+
+Serial monitor (USART1 = PA9 TX, PA10 RX):
+```json
+["stm32:A9",  "$serialMonitor:RX", "", []],
+["stm32:A10", "$serialMonitor:TX", "", []]
+```
+
+Example — potentiometer on A0:
+```json
+["pot1:SIG", "stm32:A0",    "green", []],
+["pot1:VCC", "stm32:3V3.2", "red",   []],
+["pot1:GND", "stm32:GND.2", "black", []]
+```
+
+Simulated peripherals: GPIO, USART, I2C, SPI, TIM1/2/3/4 (analogWrite), CRC, EXTI, RCC, AFIO, WWDG, GDB debugging.
+Partial: ADC1 (basic conversion only — ADC2 not implemented), DBG (DWT only).
+Not simulated: DMA, IWDG, RTC, PWR.
+
+---
+
 ### board-st-nucleo-c031c6 (STM32 Nucleo-64)
 
 ARM Cortex-M0+, 48 MHz, 32 KB Flash, 12 KB RAM.
@@ -250,6 +282,28 @@ Attrs: `"flip": "1"` mirrors the LED horizontally (useful when placing left of M
 Common values: `"220"` (LED current limit), `"1000"`, `"10000"` (pull-up/down)
 
 Add `"rotate": 90` to orient vertically.
+
+---
+
+### wokwi-potentiometer
+
+| Pin | Role |
+|---|---|
+| `VCC` | Power |
+| `GND` | Ground |
+| `SIG` | Wiper output (analog voltage) |
+
+```json
+{ "type": "wokwi-potentiometer", "id": "pot1", "top": 100, "left": 200, "attrs": {} }
+```
+
+```json
+["pot1:SIG", "esp:D34",   "green", []],
+["pot1:VCC", "esp:3V3",   "red",   []],
+["pot1:GND", "esp:GND.1", "black", []]
+```
+
+Add `"rotate": 270` for vertical orientation. Use an ADC-capable pin for `SIG`.
 
 ---
 
@@ -451,6 +505,74 @@ Default I2C on ESP32 (`board-esp32-devkit-c-v4`): SCL = `22`, SDA = `21`.
 ["oled1:SDA",   "esp:21",    "blue",  []],
 ["oled1:VCC",   "esp:3V3",   "red",   []],
 ["oled1:GND.1", "esp:GND.1", "black", []]
+```
+
+---
+
+### wokwi-74hc165 (8-bit PISO shift register — input expander)
+
+Reads 8 parallel inputs serially. Use to expand input pins. For output expansion see `wokwi-74hc595`.
+
+| Pin | Role |
+|---|---|
+| `D0`–`D7` | Parallel inputs (D7 = MSB, first bit out) |
+| `PL` | Parallel load, active low — pulse LOW to sample inputs, then HIGH to shift |
+| `CP` | Serial clock — pulse HIGH to advance to next bit |
+| `CE` | Clock enable, active low — **connect to GND**, never leave floating |
+| `Q7` | Serial output → MCU input (or next chip's `DS` in chain) |
+| `Q7_N` | Inverted serial output (usually unused) |
+| `DS` | Serial input for daisy-chaining — connect previous chip's `Q7` here; leave open for first/only chip |
+| `VCC` | Power |
+| `GND` | Ground |
+
+**Single chip wiring (Arduino Uno):**
+```json
+["sr1:Q7", "uno:D2",   "limegreen", []],
+["sr1:CP", "uno:D3",   "gold",      []],
+["sr1:PL", "uno:D4",   "purple",    []],
+["sr1:CE", "uno:GND.1","black",     []],
+["sr1:VCC","uno:5V",   "red",       []],
+["sr1:GND","uno:GND.1","black",     []]
+```
+
+**Daisy-chain (n chips → read 8×n bits, shared PL/CP/CE):**
+```json
+["in1:Q7", "in2:DS",  "limegreen", []],
+["in2:Q7", "in3:DS",  "limegreen", []],
+["in3:Q7", "uno:D2",  "limegreen", []]
+```
+
+---
+
+### wokwi-slide-switch
+
+SPDT slide switch. Pin `2` is the common (wiper); pins `1` and `3` are the two positions.
+- Switch toward `1`: pins `1`–`2` connected
+- Switch toward `3`: pins `2`–`3` connected
+
+| Pin | Role |
+|---|---|
+| `1` | Position A terminal |
+| `2` | Common (wiper) — connect to signal |
+| `3` | Position B terminal |
+
+Attr: `"value": "1"` sets initial position (`"1"` = toward pin 1, `"0"` = toward pin 3).
+
+Typical use (HIGH/LOW input to MCU):
+```json
+["sw1:1", "esp:3V3",   "red",   []],
+["sw1:3", "esp:GND.1", "black", []],
+["sw1:2", "esp:D4",    "green", []]
+```
+
+---
+
+### wokwi-text (label)
+
+Visual text label — no electrical pins. Use for annotating diagrams.
+
+```json
+{ "type": "wokwi-text", "id": "lbl1", "top": 0, "left": 200, "attrs": { "text": "Channel 0" } }
 ```
 
 ---
