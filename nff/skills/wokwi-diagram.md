@@ -598,7 +598,7 @@ Single digit (anode, COM → 5V, segments via resistors):
 { "type": "wokwi-buzzer", "id": "bz1", "top": 100, "left": 200, "attrs": { "volume": "0.1" } }
 ```
 
-Attr: `"volume"` sets playback volume (float, default `"1"`, use `"0.1"` for quiet simulation).
+Attrs: `"volume"` (default `"1.0"`, use `"0.1"` for quiet simulation). `"mode"`: `"smooth"` (default, best for `tone()`) or `"accurate"` (complex waveforms, adds click noise).
 ```json
 ["bz1:1", "esp:GND.1", "black",  []],
 ["bz1:2", "esp:D18",   "orange", []]
