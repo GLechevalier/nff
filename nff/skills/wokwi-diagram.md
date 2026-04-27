@@ -204,14 +204,33 @@ Difference from Uno: adds `A6` and `A7` — **analog input only**, cannot be use
 
 ### wokwi-attiny85
 
-| Pin group | Names |
-|---|---|
-| GPIO | `PB0`–`PB4` |
-| Power | `VCC`, `GND` |
-| Other | `RESET` (PB5) |
+8-bit AVR, 8 KB Flash, 512 B SRAM, 512 B EEPROM. Default clock: 8 MHz.
+Attr: `"frequency"`: `"1m"`, `"8m"` (default), `"16m"`, `"20m"`.
+
+| Pin | Name | Functions |
+|---|---|---|
+| `PB0` | Digital/PWM | SPI MOSI, I2C SDA |
+| `PB1` | Digital/PWM | SPI MISO |
+| `PB2` | Digital/ADC1 | SPI SCK, I2C SCL |
+| `PB3` | Digital/ADC3 | |
+| `PB4` | Digital/ADC2 | |
+| `PB5` | RESET/ADC0 | |
+| `VCC` | Power | |
+| `GND` | Ground | |
+
+PWM: `PB0` and `PB1` only (Timer0). Timer1 not simulated.
+I2C library: `TinyWireM`. No UART — use `TinyDebug` for serial output (no pins needed, uses internal simulator interface).
 
 ```json
 { "type": "wokwi-attiny85", "id": "tiny", "top": 0, "left": 0, "attrs": {} }
+```
+
+I2C wiring (SDA=PB0, SCL=PB2):
+```json
+["tiny:PB0", "dev1:SDA", "orange", []],
+["tiny:PB2", "dev1:SCL", "purple", []],
+["tiny:VCC", "dev1:VCC", "red",    []],
+["tiny:GND", "dev1:GND", "black",  []]
 ```
 
 ---
@@ -401,7 +420,7 @@ Add `"rotate": 270` for vertical orientation. Use an ADC-capable pin for `SIG`.
 { "type": "wokwi-pushbutton", "id": "btn1", "top": 100, "left": 200, "attrs": { "color": "blue", "label": "SET", "bounce": "0" } }
 ```
 
-Attrs: `"label"` sets a display label. `"bounce": "0"` disables contact bounce simulation (useful for clean step-by-step testing).
+Attrs: `"label"` sets a display label. `"bounce": "0"` disables contact bounce. `"key": "q"` binds a keyboard key to press the button (useful for games/demos).
 
 ---
 
@@ -536,8 +555,10 @@ Single digit (anode, COM → 5V, segments via resistors):
 | `2` | Signal (connect to MCU GPIO) |
 
 ```json
-{ "type": "wokwi-buzzer", "id": "bz1", "top": 100, "left": 200, "attrs": {} }
+{ "type": "wokwi-buzzer", "id": "bz1", "top": 100, "left": 200, "attrs": { "volume": "0.1" } }
 ```
+
+Attr: `"volume"` sets playback volume (float, default `"1"`, use `"0.1"` for quiet simulation).
 ```json
 ["bz1:1", "esp:GND.1", "black",  []],
 ["bz1:2", "esp:D18",   "orange", []]
@@ -557,6 +578,33 @@ I2C RTC. Pins: `GND`, `5V`, `SDA`, `SCL`. Arduino Uno default I2C: SDA = A4, SCL
 ["rtc1:5V",  "uno:5V",    "red",   []],
 ["rtc1:SDA", "uno:A4",    "blue",  []],
 ["rtc1:SCL", "uno:A5",    "gold",  []]
+```
+
+---
+
+### wokwi-neopixel-canvas (NeoPixel LED matrix)
+
+Configurable WS2812B NeoPixel grid. Single data wire, no per-LED resistors needed.
+
+| Pin | Role |
+|---|---|
+| `DIN` | Data in (connect to MCU GPIO) |
+| `VDD` | Power (5V) |
+| `VSS` | Ground |
+
+| Attr | Description |
+|---|---|
+| `rows` | Number of rows |
+| `cols` | Number of columns |
+| `matrixBrightness` | Initial brightness 0–255 (e.g. `"10"` for dim) |
+
+```json
+{ "type": "wokwi-neopixel-canvas", "id": "leds1", "top": 0, "left": 200, "attrs": { "rows": "8", "cols": "8", "matrixBrightness": "10" } }
+```
+```json
+["leds1:DIN", "esp:D2",    "green", []],
+["leds1:VDD", "esp:VIN",   "red",   []],
+["leds1:VSS", "esp:GND.1", "black", []]
 ```
 
 ---
