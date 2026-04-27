@@ -276,6 +276,58 @@ Default I2C on ESP32: `SCL = D22`, `SDA = D21`.
 
 ---
 
+### board-mfrc522 (RFID/NFC reader)
+
+SPI (Mode 0) RFID reader for 13.56 MHz MIFARE cards. Libraries: `MFRC522` (Miguel Balboa) or `Arduino_MFRC522v2`.
+
+| Pin | Role |
+|---|---|
+| `3.3V` | Power |
+| `GND` | Ground |
+| `RST` | Reset (active low) |
+| `SDA` | SPI chip select (active low) |
+| `SCK` | SPI clock |
+| `MOSI` | SPI data in |
+| `MISO` | SPI data out |
+| `IRQ` | Interrupt (active low, optional) |
+
+| Attr | Default | Description |
+|---|---|---|
+| `uid` | `""` | Custom UID for Blue Card only — format `"01:02:03:04"` (4-byte) or `"04:11:22:33:44:55:66"` (7-byte) |
+
+Built-in card presets (selectable in simulator control panel):
+
+| Index | Card | UID | Type |
+|---|---|---|---|
+| `0` | Blue (customizable) | `01:02:03:04` | MIFARE Classic 1K |
+| `1` | Green | `11:22:33:44` | MIFARE Classic 1K |
+| `2` | Yellow | `55:66:77:88` | MIFARE Classic 1K |
+| `3` | Red | `AA:BB:CC:DD` | MIFARE Classic 1K |
+| `4` | NFC Tag | `04:11:22:33:44:55:66` | MIFARE Ultralight |
+| `5` | Key Fob | `C0:FF:EE:99` | MIFARE Mini |
+
+Automation controls: `card` (int 0–5), `tagPresent` (0 = remove, 1 = present).
+
+ESP32 default SPI wiring (GPIO 5 = CS, GPIO 21 = RST):
+
+```json
+{ "type": "board-mfrc522", "id": "rfid1", "top": 100, "left": 200, "attrs": { "uid": "DE:AD:BE:EF" } }
+```
+
+```json
+["rfid1:SDA",  "esp:5",     "green",  []],
+["rfid1:SCK",  "esp:18",    "orange", []],
+["rfid1:MISO", "esp:19",    "blue",   []],
+["rfid1:MOSI", "esp:23",    "yellow", []],
+["rfid1:RST",  "esp:21",    "purple", []],
+["rfid1:3.3V", "esp:3V3",   "red",    []],
+["rfid1:GND",  "esp:GND.2", "black",  []]
+```
+
+Arduino Uno wiring: CS = D10, RST = D9, MISO = D12, MOSI = D11, SCK = D13.
+
+---
+
 ### board-grove-oled-sh1107 (128×128 OLED)
 
 Monochrome 128×128 I2C OLED. **SPI not supported.** Note the `.1` suffixes on `SCL` and `GND`.
