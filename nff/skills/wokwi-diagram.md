@@ -155,16 +155,58 @@ Same as Uno plus `AREF`. Power: `5V`, `3V3`, `GND.1`, `GND.2`.
 
 ---
 
+### board-st-nucleo-l031k6 (STM32 Nucleo-32)
+
+ARM Cortex-M0+, 32 MHz, 32 KB Flash, 8 KB RAM, 1 KB EEPROM.
+
+Onboard LED: `PB3` = `D13` = `LED_BUILTIN` — lit when driven HIGH.
+
+Pin naming: STM32-style (`PA2`, `PB3`…) and Arduino-style (`D0`, `D1`, `D13`, `A0`…) both work.
+Power: `VIN`, `5V.1`, `GND.1`–`GND.9`.
+
+Serial monitor uses **VCP pin names** (different from C031C6 which uses `PA2`/`PA3`):
+```json
+["$serialMonitor:TX", "nucleo:VCP_RX", "", []],
+["$serialMonitor:RX", "nucleo:VCP_TX", "", []]
+```
+
+Default I2C: `SDA = D0`, `SCL = D1`.
+```json
+["dev1:SDA", "nucleo:D0", "green", []],
+["dev1:SCL", "nucleo:D1", "gold",  []],
+["dev1:VCC", "nucleo:VIN","red",   []],
+["dev1:GND", "nucleo:GND.2","black",[]]
+```
+
+Simulated peripherals: GPIO, USART, I2C (master only), SPI (master only), ADC, EEPROM, TIM2/21/22 (analogWrite), CRC, EXTI, RCC, GDB debugging.
+Partial: SYSCFG (EXTICRn only), WWDG (untested).
+Not simulated: DMA, IWDG, RTC, PWR, Comparator, LPTIM, LPUART.
+
+---
+
 ### board-st-nucleo-c031c6 (STM32 Nucleo-64)
 
 ARM Cortex-M0+, 48 MHz, 32 KB Flash, 12 KB RAM.
 
 Onboard LED: `PA5` = `D13` = `LED_BUILTIN` — lit when driven HIGH.
 
+Pin naming: STM32-style (`PA2`, `PB6`…) **and** Arduino-style (`D13`, `A0`…) both work.
+GND: numbered suffix up to at least `GND.9` — use `GND.1` as default.
+
+Serial monitor (USART2 = PA2/PA3):
+```json
+["$serialMonitor:TX", "nucleo:PA3", "", []],
+["$serialMonitor:RX", "nucleo:PA2", "", []]
+```
+
+Example — LED on D13:
+```json
+["led1:A", "nucleo:D13",  "green", []],
+["led1:C", "nucleo:GND.1","black", []]
+```
+
 Simulated peripherals: GPIO, USART, I2C (master only), SPI (master only), ADC, TIM1/3/14/16/17 (analogWrite), CRC, EXTI, GDB debugging.
 Not simulated: DMA, IWDG, RTC, PWR, SYSCFG.
-
-> No diagram.json example available yet — add wiring snippets when a reference circuit is confirmed.
 
 ---
 
@@ -181,7 +223,9 @@ Not simulated: DMA, IWDG, RTC, PWR, SYSCFG.
 { "type": "wokwi-led", "id": "led1", "top": 100, "left": 200, "attrs": { "color": "red" } }
 ```
 
-Colors: `"red"`, `"green"`, `"blue"`, `"yellow"`, `"white"`, `"orange"`
+Colors: `"red"`, `"green"`, `"blue"`, `"yellow"`, `"white"`, `"orange"`, `"limegreen"`
+
+Attrs: `"flip": "1"` mirrors the LED horizontally (useful when placing left of MCU).
 
 **Standard blink circuit (GPIO → R → LED → GND):**
 ```json
@@ -262,6 +306,31 @@ Add `"rotate": 90` to orient vertically.
 ["esp:3V3",   "tmp1:VCC", "red",   []],
 ["esp:GND.1", "tmp1:GND", "black", []],
 ["esp:D34",   "tmp1:OUT", "green", []]
+```
+
+---
+
+### wokwi-lcd1602 / wokwi-lcd2004 (I2C LCD)
+
+Character LCD: 16×2 (`wokwi-lcd1602`) or 20×4 (`wokwi-lcd2004`). Set `attrs: { "pins": "i2c" }` to use I2C mode (default is parallel — always use I2C in Wokwi).
+
+| Pin | Role |
+|---|---|
+| `VCC` | Power (5V) |
+| `GND` | Ground |
+| `SDA` | I2C data |
+| `SCL` | I2C clock |
+
+```json
+{ "type": "wokwi-lcd2004", "id": "lcd1", "top": 100, "left": 200, "attrs": { "pins": "i2c" } }
+```
+
+ESP32 wiring (I2C default D21/D22):
+```json
+["lcd1:SDA", "esp:D21",   "green", []],
+["lcd1:SCL", "esp:D22",   "gold",  []],
+["lcd1:VCC", "esp:VIN",   "red",   []],
+["lcd1:GND", "esp:GND.1", "black", []]
 ```
 
 ---
