@@ -238,7 +238,7 @@ def flash(
     """
     fqbn, resolved_port = _resolve_target(board, port, sim=sim)
     sketch_dir = _resolve_sketch(file)
-
+    
     if sim:
         console.print(
             f"  [bold]{sketch_dir.name}[/bold]  →  "

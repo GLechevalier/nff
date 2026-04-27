@@ -38,12 +38,14 @@ from nff.commands.flash import flash        # noqa: E402
 from nff.commands.monitor import monitor    # noqa: E402
 from nff.commands.doctor import doctor      # noqa: E402
 from nff.commands.wokwi import wokwi        # noqa: E402
+from nff.commands.clean import clean        # noqa: E402
 
 cli.add_command(init)
 cli.add_command(flash)
 cli.add_command(monitor)
 cli.add_command(doctor)
 cli.add_command(wokwi)
+cli.add_command(clean)
 
 
 @cli.command("install-deps")

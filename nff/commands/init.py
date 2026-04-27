@@ -80,13 +80,24 @@ def _pick_device(devices: list[DetectedDevice]) -> DetectedDevice:
 def _register_mcp_claude_code() -> bool:
     """Register nff with Claude Code CLI via `claude mcp add`.
 
+    Uses the absolute path of the running nff executable so Claude Code can
+    locate it on Windows where bare-name resolution may fail.
+
     Returns True on success, False if `claude` is not in PATH or the command fails.
     """
     if not shutil.which("claude"):
         return False
+
+    nff_exe = shutil.which("nff") or sys.executable
+    # On Windows prefer the .exe alongside the current interpreter if found
+    if sys.platform == "win32":
+        candidate = Path(sys.executable).parent / "nff.exe"
+        if candidate.exists():
+            nff_exe = str(candidate)
+
     try:
         result = subprocess.run(
-            ["claude", "mcp", "add", "nff", "nff", "mcp"],
+            ["claude", "mcp", "add", "--scope", "user", "nff", nff_exe, "mcp"],
             capture_output=True,
             text=True,
             timeout=15,
@@ -201,6 +212,7 @@ _CLAUDE_MD_TEMPLATE = """\
 - Never install libraries with arduino-cli. Write sketches that use built-in APIs,
   or ask the user to install the library first.
 - For ESP32 servo/PWM use ledcAttach + ledcWrite (built-in LEDC, no library needed).
+- Write sketches in the **current directory**: `<name>.ino` (not in a subdirectory).
 
 ## Connected Device
 - Board  : {board}
@@ -210,10 +222,38 @@ _CLAUDE_MD_TEMPLATE = """\
 
 ---
 
-## Workflow — Real Hardware
+## nff CLI Commands
 
 ```
-flash(code)           compile + upload sketch via MCP tool
+nff mcp                               start the MCP server (Claude Code calls this automatically)
+nff flash <sketch.ino>                compile + upload to {port}
+nff flash <sketch.ino> --sim          compile + simulate with Wokwi (no hardware needed)
+nff flash <sketch.ino> --board <fqbn> override board FQBN
+nff flash <sketch.ino> --port <port>  override serial port
+nff monitor                           open interactive serial monitor on {port}
+nff monitor --port <port> --baud <n>  override port / baud rate
+nff wokwi init                        scaffold wokwi.toml + diagram.json in cwd
+nff wokwi run                         run headless Wokwi simulation, stream serial output
+nff wokwi run --gui                   open animated circuit in VS Code
+nff wokwi run --timeout <ms>          set simulation wall-clock timeout (default 5000 ms)
+nff wokwi run --serial-log <file>     write captured serial output to a file
+nff doctor                            check all dependencies and config
+nff init                              re-detect board, rewrite config + CLAUDE.md
+```
+
+---
+
+## Workflow — Real Hardware
+
+Iteration loop:
+1. Write / edit `<name>.ino` in the current directory.
+2. `nff flash <name>.ino` — compile and upload.
+3. `nff monitor` — inspect serial output (Ctrl+C to quit).
+4. Fix bugs, repeat from step 2.
+
+MCP tools (called by Claude, no terminal needed):
+```
+flash(code)           compile + upload sketch
 serial_read(3000)     capture 3 s of serial output
 serial_write(data)    send a string to the device
 reset_device()        hardware reset via DTR toggle
@@ -221,29 +261,24 @@ list_devices()        verify board is connected
 get_device_info()     port / board / FQBN / baud
 ```
 
-Iteration loop:
-1. flash(code) — upload sketch
-2. serial_read(3000) — read output
-3. Fix bugs, repeat
-
 ---
 
 ## Workflow — Wokwi Simulation (no hardware needed)
 
-### Quick (MCP tool, headless)
-1. wokwi_flash(code, board="{fqbn}") — compile + simulate, returns serial_output
-2. Inspect serial_output — no USB cable required
-3. Iterate until output is correct
-4. flash(code) — upload to real hardware when ready
+### Quick — headless via MCP tool
+1. `wokwi_flash(code, board="{fqbn}")` — compile + simulate, returns serial output.
+2. Inspect `serial_output` — no USB cable required.
+3. Iterate until output is correct, then `flash(code)` to upload to real hardware.
 
-### Full pipeline (visual, with circuit)
-1. Write sketch to sketches/<name>/<name>.ino
-2. Edit diagram.json to add components (see below)
-3. nff flash --sim sketches/<name> --board {fqbn}
-4. nff wokwi run --gui   ← opens VS Code with animated circuit
-
-wokwi.toml must point to the compiled ELF:
-  firmware = "sketches/<name>/build/{fqbn_dotted}/<name>.elf/<name>.ino.elf"
+### Full pipeline — visual circuit
+1. Write `<name>.ino` in the current directory.
+2. `nff wokwi init --board {fqbn}` — creates `wokwi.toml` + `diagram.json`.
+3. Edit `diagram.json` to add components (LEDs, buttons, servos…).
+4. `nff flash <name>.ino --sim --board {fqbn}` — compile.
+5. Update `wokwi.toml` firmware path:
+     firmware = "build/{fqbn_dotted}/<name>.ino.elf"
+6. `nff wokwi run --gui` — opens animated circuit in VS Code.
+7. Fix bugs, repeat from step 4.
 
 ---
 
@@ -258,17 +293,13 @@ ESP32 pin names: esp:D<gpio>  esp:GND.1  esp:GND.2  esp:3V3  esp:VIN
 Common components:
   wokwi-led          attrs: color (red/green/blue/yellow)
   wokwi-pushbutton   attrs: color — pins: btn:1.l (gpio), btn:2.l (GND)
-  wokwi-servo        attrs: minAngle, maxAngle — pins: PWM, V+, GND
+  wokwi-servo        attrs: minAngle "-90", maxAngle "90" — pins: PWM, V+, GND
   wokwi-resistor     attrs: value (ohms)
   wokwi-ntc-temperature-sensor
 
-Pushbutton wiring:
+Pushbutton wiring (INPUT_PULLUP):
   ["esp:D15", "btn1:1.l", "green", []]
   ["esp:GND.2", "btn1:2.l", "black", []]
-  pinMode(BUTTON_PIN, INPUT_PULLUP) in sketch
-
-Servo attrs for correct visual mapping:
-  {{ "minAngle": "-90", "maxAngle": "90" }}
 
 ---
 
@@ -291,16 +322,16 @@ ledcWrite(SERVO_PIN, 4915);      // center position
 ## Debugging
 
 Simulation:
-- Compile error    → fix sketch, re-run nff flash --sim
-- Wrong output     → nff wokwi run --serial-log out.txt, inspect out.txt
-- Component silent → check diagram.json pin names and connection direction
-- Servo wrong angle→ verify duty values match the 500–2500 µs Wokwi range
-- Button skipped   → ensure INPUT_PULLUP and wiring gpio→btn:1.l, GND→btn:2.l
+- Compile error     → fix sketch, re-run nff flash --sim
+- Wrong output      → nff wokwi run --serial-log out.txt, inspect out.txt
+- Component silent  → check diagram.json pin names and connection direction
+- Servo wrong angle → verify duty values match the 500–2500 µs Wokwi range
+- Button skipped    → ensure INPUT_PULLUP and wiring gpio→btn:1.l, GND→btn:2.l
 
 Hardware:
-- Port not found   → nff init to re-detect
-- Upload fails     → nff flash --manual-reset, hold BOOT when prompted
-- Wrong output     → nff monitor --baud 115200
+- Port not found    → nff init to re-detect
+- Upload fails      → nff flash --manual-reset, hold BOOT when prompted
+- Wrong output      → nff monitor --baud 115200
 """
 
 
