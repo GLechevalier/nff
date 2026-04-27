@@ -529,6 +529,39 @@ Default I2C on ESP32 (`board-esp32-devkit-c-v4`): SCL = pin `22`, SDA = pin `21`
 
 Supports simulation controls (sliders) and automation `set-control` for `temperature` and `pressure`.
 
+### wokwi-gas-sensor (MQ2 gas sensor)
+
+Detects combustible gases (LPG, propane, hydrogen, methane, CO). Analog output for concentration, digital output for threshold detection.
+
+| Pin | Role |
+|---|---|
+| `VCC` | Power (5V or 3.3V) |
+| `GND` | Ground |
+| `AOUT` | Analog output — voltage rises with gas concentration |
+| `DOUT` | Digital output — goes **LOW** when ppm exceeds threshold |
+
+> Pin names in diagram.json are `AOUT` and `DOUT` — **not** `AO`/`DO` as the datasheet labels suggest.
+
+| Attr | Default | Description |
+|---|---|---|
+| `ppm` | `"400"` | Initial gas concentration in parts per million |
+| `threshold` | `"4.4"` | Voltage threshold for `DOUT` to go LOW |
+
+```json
+{ "type": "wokwi-gas-sensor", "id": "gas1", "top": 100, "left": 200, "attrs": { "ppm": "400", "threshold": "4.4" } }
+```
+
+```json
+["gas1:VCC",  "uno:3.3V",  "red",    []],
+["gas1:GND",  "uno:GND.3", "black",  []],
+["gas1:AOUT", "uno:A0",    "green",  []],
+["gas1:DOUT", "uno:8",     "violet", []]
+```
+
+Use `analogRead(A0)` for relative concentration; `digitalRead(8)` reads LOW when threshold is exceeded.
+
+---
+
 > Niche components (steppers, shift registers, RFID, matrix displays, joystick, RTC, NeoPixel, SH1107) → `/wokwi-diagram-extended`
 
 ---
