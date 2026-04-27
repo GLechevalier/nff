@@ -252,6 +252,42 @@ Default I2C on ESP32: `SCL = D22`, `SDA = D21`.
 
 ---
 
+### board-bmp180 (barometric pressure + temperature)
+
+I2C address `0x77`. Compatible with BMP085 libraries (e.g. `Adafruit_BMP085`).
+
+| Pin | Role |
+|---|---|
+| `VCC` | Voltage supply |
+| `3.3V` | 3.3V supply (use this on ESP32) |
+| `GND` | Ground |
+| `SCL` | I2C clock |
+| `SDA` | I2C data |
+
+| Attr | Default | Range |
+|---|---|---|
+| `temperature` | `"24"` | -40 to 85 °C |
+| `pressure` | `"101325"` | 30000–110000 Pa |
+
+> Also available as `wokwi-bmp180` (legacy type name).
+
+Default I2C on ESP32 (`board-esp32-devkit-c-v4`): SCL = pin `22`, SDA = pin `21`.
+
+```json
+{ "type": "board-bmp180", "id": "bmp1", "top": 100, "left": 200, "attrs": { "temperature": "24", "pressure": "101325" } }
+```
+
+```json
+["bmp1:SCL", "esp:22",    "green", []],
+["bmp1:SDA", "esp:21",    "green", []],
+["bmp1:3.3V","esp:3V3",   "red",   []],
+["bmp1:GND", "esp:GND.2", "black", []]
+```
+
+Supports simulation controls (sliders) and automation `set-control` for `temperature` and `pressure`.
+
+---
+
 ## Positioning Tips
 
 - `top` / `left` are canvas pixels; `0,0` is top-left of the first placed part.
