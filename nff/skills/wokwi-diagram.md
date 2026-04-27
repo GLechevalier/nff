@@ -755,6 +755,61 @@ Reads 8 parallel inputs serially. Use to expand input pins. For output expansion
 
 ---
 
+### wokwi-analog-joystick
+
+| Pin | Role |
+|---|---|
+| `VCC` | Power (5V) |
+| `VERT` | Vertical axis — analog 0 (bottom) to VCC (top) |
+| `HORZ` | Horizontal axis — analog 0 (**right**) to VCC (**left**) — **axis is inverted** |
+| `SEL` | Push button — shorts to GND when pressed; use `INPUT_PULLUP` |
+| `GND` | Ground |
+
+Attr: `"bounce": "0"` disables button bounce on SEL.
+Automation controls: `x` / `y` (float -1 to 1, 0 = center), `pressed` (int 0/1).
+
+```json
+{ "type": "wokwi-analog-joystick", "id": "joy1", "top": 0, "left": 200, "attrs": {} }
+```
+```json
+["joy1:VCC",  "uno:5V",    "red",    []],
+["joy1:GND",  "uno:GND.1", "black",  []],
+["joy1:VERT", "uno:A0",    "purple", []],
+["joy1:HORZ", "uno:A1",    "green",  []],
+["joy1:SEL",  "uno:D2",    "blue",   []]
+```
+
+> `analogRead(HORZ)` returns 0 when pushed right, 1023 when pushed left. Use `map(val, 0, 1023, -100, 100)` to get a centered range.
+
+---
+
+### wokwi-max7219-matrix (LED dot matrix)
+
+8×8 LED matrix driven by MAX7219 over SPI. Supports chaining.
+
+| Pin | Role |
+|---|---|
+| `DIN` | SPI data in |
+| `CS` | Chip select |
+| `CLK` | SPI clock |
+| `V+` | Power (5V) |
+| `GND` | Ground |
+
+Attr: `"chain": "2"` chains N matrices side-by-side (e.g. `"2"` = 16×8).
+
+```json
+{ "type": "wokwi-max7219-matrix", "id": "mat1", "top": 0, "left": 200, "attrs": { "chain": "1" } }
+```
+```json
+["mat1:DIN", "uno:D11",   "green",  []],
+["mat1:CS",  "uno:D10",   "blue",   []],
+["mat1:CLK", "uno:D13",   "orange", []],
+["mat1:V+",  "uno:5V",    "red",    []],
+["mat1:GND", "uno:GND.1", "black",  []]
+```
+
+---
+
 ### wokwi-slide-switch
 
 SPDT slide switch. Pin `2` is the common (wiper); pins `1` and `3` are the two positions.
