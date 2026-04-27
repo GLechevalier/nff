@@ -509,6 +509,47 @@ Default I2C on ESP32 (`board-esp32-devkit-c-v4`): SCL = `22`, SDA = `21`.
 
 ---
 
+### wokwi-74hc595 (8-bit SIPO shift register — output expander)
+
+Drives 8 parallel outputs from 3 MCU pins. Use for LEDs, 7-segment displays. For input expansion see `wokwi-74hc165`.
+
+| Pin | Role |
+|---|---|
+| `DS` | Serial data input |
+| `SHCP` | Serial clock |
+| `STCP` | Storage/latch clock — pulse HIGH to push shift register to outputs |
+| `OE` | Output enable, active low — **connect to GND** to permanently enable |
+| `MR` | Master reset, active low — **connect to VCC** to disable reset |
+| `Q0`–`Q7` | Parallel outputs (Q0 = LSB first with `LSBFIRST`) |
+| `Q7S` | Serial output for daisy-chaining → connect to next chip's `DS` |
+| `VCC` | Power |
+| `GND` | Ground |
+
+**Single chip wiring (Arduino Uno, DS=D8, STCP=D9, SHCP=D10):**
+```json
+["uno:8",     "sr1:DS",   "orange", []],
+["uno:9",     "sr1:STCP", "purple", []],
+["uno:10",    "sr1:SHCP", "brown",  []],
+["uno:GND.2", "sr1:OE",   "black",  []],
+["uno:5V",    "sr1:MR",   "red",    []],
+["uno:5V",    "sr1:VCC",  "red",    []],
+["uno:GND.2", "sr1:GND",  "black",  []]
+```
+
+**Daisy-chain (shared STCP/SHCP, n chips → 8×n outputs):**
+```json
+["sr1:Q7S", "sr2:DS", "orange", []]
+```
+
+**Q0–Q7 → LED via resistor pattern:**
+```json
+["sr1:Q0", "r1:1", "green", []],
+["r1:2",   "led1:A", "green", []],
+["led1:C", "uno:GND.2", "black", []]
+```
+
+---
+
 ### wokwi-74hc165 (8-bit PISO shift register — input expander)
 
 Reads 8 parallel inputs serially. Use to expand input pins. For output expansion see `wokwi-74hc595`.
