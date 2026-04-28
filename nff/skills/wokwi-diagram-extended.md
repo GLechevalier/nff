@@ -1570,6 +1570,37 @@ ESP32 wiring (OUT on GPIO34 — ADC-only pin):
 
 ---
 
+### wokwi-pir-motion-sensor (PIR motion sensor)
+
+Passive Infrared motion sensor. `OUT` goes **HIGH** when motion is detected, stays HIGH for `delayTime` seconds, then goes LOW. After going LOW the sensor ignores further input for `inhibitTime` seconds before sensing again.
+
+| Pin | Role |
+|---|---|
+| `VCC` | Power (5V) |
+| `GND` | Ground |
+| `OUT` | Digital output — HIGH = motion detected |
+
+| Attr | Default | Description |
+|---|---|---|
+| `delayTime` | `"5"` | Seconds `OUT` stays HIGH after motion |
+| `inhibitTime` | `"1.2"` | Seconds the sensor ignores motion after `OUT` returns LOW |
+| `retrigger` | `""` | Default (enabled): delay resets each time new motion is detected while `OUT` is HIGH. Set `"0"` to disable retriggering. |
+
+**Triggering in simulation:** click the sensor while running → pop-up → **"Simulate Motion"**.
+
+```json
+{ "type": "wokwi-pir-motion-sensor", "id": "pir1", "top": -42, "left": 25.81, "attrs": {} }
+```
+
+Arduino Uno wiring (OUT on pin 2, indicator LED on pin 13):
+```json
+["pir1:VCC", "uno:5V",    "red",   []],
+["pir1:GND", "uno:GND.1", "black", []],
+["pir1:OUT", "uno:2",     "green", []]
+```
+
+---
+
 ### wokwi-photoresistor-sensor (LDR module)
 
 LDR in series with a 10K resistor. `AO` is an analog voltage that falls as illumination rises. `DO` goes **HIGH in darkness, LOW in light** (threshold-controlled); the onboard DO LED lights when `DO` is LOW.
