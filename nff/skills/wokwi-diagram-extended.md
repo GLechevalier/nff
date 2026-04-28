@@ -1240,3 +1240,64 @@ Arduino Uno wiring (CLK = 2, DT = 3, SW = 4 — CLK/DT on interrupt pins):
 ```
 
 ---
+
+### wokwi-membrane-keypad (4×4 / 4×3 matrix keypad)
+
+Standard membrane keypad. Rows and columns are scanned by the MCU to detect key presses.
+
+| Pin | Role |
+|---|---|
+| `R1` | Row 1 (top row) |
+| `R2` | Row 2 |
+| `R3` | Row 3 |
+| `R4` | Row 4 (bottom row) |
+| `C1` | Column 1 (left) |
+| `C2` | Column 2 |
+| `C3` | Column 3 |
+| `C4` | Column 4 (right) — not present when `columns` = `"3"` |
+
+| Attr | Default | Description |
+|---|---|---|
+| `columns` | `"4"` | `"4"` for 4×4 keypad, `"3"` for 4×3 keypad (no C4/R* column) |
+| `keys` | `["1","2","3","A","4","5","6","B","7","8","9","C","*","0","#","D"]` | Flat array of key labels, row-major order. Must be exactly `rows × columns` entries. Unicode supported (e.g. `"★"`, `"Ⓐ"`). |
+
+> Key labels in `keys` define what `keypad.getKey()` returns in code — they must be single ASCII characters for the `Keypad` library. Label and return value can differ but keeping them consistent avoids confusion.
+
+**Keyboard shortcuts** (click keypad to focus): press `0–9`, `A`, `B`, `C`, `D`, `*`, `#` to activate the corresponding key.
+
+```json
+{ "type": "wokwi-membrane-keypad", "id": "keypad1", "top": 0, "left": 94, "attrs": {} }
+```
+
+Arduino Uno wiring (R1–R4 = pins 9–6, C1–C4 = pins 5–2):
+```json
+["keypad1:R1", "uno:9", "gold",   []],
+["keypad1:R2", "uno:8", "purple", []],
+["keypad1:R3", "uno:7", "green",  []],
+["keypad1:R4", "uno:6", "blue",   []],
+["keypad1:C1", "uno:5", "pink",   []],
+["keypad1:C2", "uno:4", "orange", []],
+["keypad1:C3", "uno:3", "gray",   []],
+["keypad1:C4", "uno:2", "brown",  []]
+```
+
+Library: `Keypad` (Mark Stanley). Constructor takes key map, row pins, col pins, and dimensions:
+```cpp
+#include <Keypad.h>
+const uint8_t ROWS = 4, COLS = 4;
+char keys[ROWS][COLS] = {
+  {'1','2','3','A'}, {'4','5','6','B'},
+  {'7','8','9','C'}, {'*','0','#','D'}
+};
+uint8_t rowPins[ROWS] = {9, 8, 7, 6};
+uint8_t colPins[COLS] = {5, 4, 3, 2};
+Keypad keypad = Keypad(makeKeymap(keys), rowPins, colPins, ROWS, COLS);
+// loop: char key = keypad.getKey(); if (key != NO_KEY) Serial.println(key);
+```
+
+4×3 variant (omit C4, set `"columns": "3"`, use 3-entry `colPins`):
+```json
+{ "type": "wokwi-membrane-keypad", "id": "keypad1", "top": 0, "left": 94, "attrs": { "columns": "3" } }
+```
+
+---
