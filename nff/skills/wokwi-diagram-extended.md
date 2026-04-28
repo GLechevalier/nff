@@ -1338,6 +1338,51 @@ NEC address is always `0`. Commands and keyboard shortcuts:
 
 ---
 
+### wokwi-rgb-led (5mm common-anode/cathode RGB LED)
+
+Single 5mm RGB LED with a shared common pin. Each color channel needs a ~220 Ω series resistor.
+
+| Pin | Role |
+|---|---|
+| `R` | Red channel |
+| `G` | Green channel |
+| `B` | Blue channel |
+| `COM` | Common — anode (VCC) by default, or cathode (GND) when attr is `"cathode"` |
+
+| Attr | Default | Description |
+|---|---|---|
+| `common` | `"anode"` | `"anode"`: COM → VCC, drive R/G/B LOW to light. `"cathode"`: COM → GND, drive R/G/B HIGH to light. |
+
+```json
+{ "type": "wokwi-rgb-led", "id": "rgb1", "top": 0, "left": 200, "attrs": { "common": "cathode" } }
+```
+
+**Common-cathode wiring (COM → GND, drive pins HIGH to light — use PWM for color mixing):**
+```json
+["rgb1:COM", "uno:GND.1", "black",  []],
+["r1:2",     "rgb1:R",    "red",    []],
+["r2:2",     "rgb1:G",    "green",  []],
+["r3:2",     "rgb1:B",    "blue",   []],
+["uno:11",   "r1:1",      "red",    []],
+["uno:10",   "r2:1",      "green",  []],
+["uno:9",    "r3:1",      "blue",   []]
+```
+
+**Common-anode wiring (COM → 3.3V or 5V, drive pins LOW to light):**
+```json
+["rgb1:COM", "uno:3.3V",  "red",   []],
+["r1:2",     "rgb1:R",    "red",   []],
+["r2:2",     "rgb1:G",    "green", []],
+["r3:2",     "rgb1:B",    "blue",  []],
+["uno:11",   "r1:1",      "red",   []],
+["uno:10",   "r2:1",      "green", []],
+["uno:9",    "r3:1",      "blue",  []]
+```
+
+> `r1`, `r2`, `r3` are `wokwi-resistor` parts with `"value": "220"`. Use PWM-capable pins (3, 5, 6, 9, 10, 11 on Uno) for smooth `analogWrite()` color mixing.
+
+---
+
 ### wokwi-relay-module (single-channel relay module)
 
 Electrically operated SPDT switch. COM switches between NC and NO depending on the IN signal and the `transistor` attr.
