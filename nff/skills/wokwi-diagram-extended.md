@@ -829,6 +829,42 @@ Default I2C on ESP32 (`board-esp32-devkit-c-v4`): SCL = `22`, SDA = `21`.
 
 ---
 
+### board-nokia-5110 (84×48 monochrome LCD)
+
+Nokia 5110 / PCD8544 graphic LCD. SPI interface. **Power with 3.3V only — not 5V.** `BL` (backlight) can be connected to 3.3V to enable the backlight, or to a PWM pin for dimming.
+
+| Pin | Role |
+|---|---|
+| `RST` | Reset (active low) |
+| `CE` | Chip enable / chip select (active low) |
+| `DC` | Data / command select |
+| `DIN` | SPI data input (MOSI) |
+| `CLK` | SPI clock |
+| `VCC` | Power (**3.3V only**) |
+| `BL` | Backlight — connect to 3.3V to enable, or PWM pin for dimming |
+| `GND` | Ground |
+
+No configurable attrs.
+
+Library: `Adafruit PCD8544` (+ `Adafruit_GFX`). Key calls: `display.begin()`, `display.clearDisplay()`, `display.setCursor()`, `display.println()`, `display.display()`.
+
+```json
+{ "type": "board-nokia-5110", "id": "lcd", "top": 49.02, "left": 139.2, "attrs": {} }
+```
+
+Arduino Uno wiring (CLK=3, DIN=4, DC=5, RST=6, CE=7, 3.3V power):
+```json
+["lcd:CLK", "uno:3",    "orange", []],
+["lcd:DIN", "uno:4",    "green",  []],
+["lcd:DC",  "uno:5",    "purple", []],
+["lcd:RST", "uno:6",    "violet", []],
+["lcd:CE",  "uno:7",    "blue",   []],
+["lcd:VCC", "uno:3.3V", "red",    []],
+["lcd:GND", "uno:GND.1","black",  []]
+```
+
+---
+
 ### wokwi-74hc595 (8-bit SIPO shift register — output expander)
 
 Drives 8 parallel outputs from 3 MCU pins. Use for LEDs, 7-segment displays. For input expansion see `wokwi-74hc165`.
