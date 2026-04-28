@@ -370,7 +370,12 @@ Attrs: `"volume"` (default `"1.0"`, use `"0.1"` for quiet simulation). `"mode"`:
 
 ### wokwi-lcd1602 / wokwi-lcd2004 (character LCD)
 
-16×2 (`wokwi-lcd1602`) or 20×4 (`wokwi-lcd2004`) HD44780 character LCD. Supports two wiring modes controlled by the `pins` attr.
+| Type | Size |
+|---|---|
+| `wokwi-lcd1602` | 16 characters × 2 lines |
+| `wokwi-lcd2004` | 20 characters × 4 lines |
+
+Same HD44780 controller — identical pins, attrs, and wiring. Supports two wiring modes controlled by the `pins` attr.
 
 | Attr | Default | Description |
 |---|---|---|
@@ -452,6 +457,18 @@ Arduino Uno wiring (RS=12, E=11, D4=10, D5=9, D6=8, D7=7):
 ```
 
 > Custom characters: use `lcd.createChar(index, bitmap)` (indexes 0–7), print with `lcd.write(index)`. Characters can be updated at runtime for simple animations.
+
+**wokwi-lcd2004 part declaration (4-line, 20-char):**
+```json
+{ "type": "wokwi-lcd2004", "id": "lcd1", "top": 8, "left": 20, "attrs": {} }
+```
+
+I2C mode:
+```json
+{ "type": "wokwi-lcd2004", "id": "lcd1", "top": 8, "left": 20, "attrs": { "pins": "i2c" } }
+```
+
+All wiring is identical to `wokwi-lcd1602` — substitute `"wokwi-lcd2004"` as the `type` and reuse the connections above verbatim.
 
 ---
 
