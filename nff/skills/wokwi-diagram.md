@@ -229,23 +229,46 @@ Add `"rotate": 90` to orient vertically.
 
 ### wokwi-potentiometer
 
+Also applies to `wokwi-slide-potentiometer` (same pins, attrs, and controls).
+
 | Pin | Role |
 |---|---|
 | `VCC` | Power |
 | `GND` | Ground |
-| `SIG` | Wiper output (analog voltage) |
+| `SIG` | Wiper output — connect to ADC pin |
+
+> GND/VCC are optional in simulation (no full analog sim), but always wire them for real-hardware parity.
+
+| Attr | Default | Description |
+|---|---|---|
+| `value` | `"0"` | Initial wiper position (0–1023) |
+
+**Keyboard shortcuts** (click pot to focus): Left/Right — fine · PageUp/PageDown — coarse · Home/End — 0 or 1023.
+
+**Automation control:** `position` (float 0.0–1.0) — e.g. `value: 0.5` = middle.
 
 ```json
-{ "type": "wokwi-potentiometer", "id": "pot1", "top": 100, "left": 200, "attrs": {} }
+{ "type": "wokwi-potentiometer", "id": "pot1", "top": 100, "left": 200, "attrs": { "value": "0" } }
 ```
 
+ESP32 wiring (SIG on GPIO34 — ADC-only pin):
 ```json
 ["pot1:SIG", "esp:D34",   "green", []],
 ["pot1:VCC", "esp:3V3",   "red",   []],
 ["pot1:GND", "esp:GND.1", "black", []]
 ```
 
-Add `"rotate": 270` for vertical orientation. Use an ADC-capable pin for `SIG`.
+Arduino Uno + servo (potentiometer on A0, servo on pin 9):
+```json
+["pot1:SIG", "uno:A0",    "green", []],
+["pot1:VCC", "uno:5V",    "red",   []],
+["pot1:GND", "uno:GND.1", "black", []],
+["uno:9",    "srv1:PWM",  "orange",[]],
+["uno:5V",   "srv1:V+",   "red",   []],
+["uno:GND.1","srv1:GND",  "black", []]
+```
+
+Add `"rotate": 90` (or `270`) for vertical orientation.
 
 ---
 
