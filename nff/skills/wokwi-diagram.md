@@ -667,6 +667,49 @@ Use `analogRead(A0)` for relative concentration; `digitalRead(8)` reads LOW when
 
 ---
 
+### wokwi-logic-analyzer (8-channel digital logic analyzer)
+
+Captures digital signals to a VCD file for offline analysis. Does not affect circuit behavior — purely observational.
+
+| Pin | Role |
+|---|---|
+| `D0`–`D7` | Input channels (connect to any digital signal to monitor) |
+| `GND` | Digital ground reference — **always connect** |
+
+| Attr | Default | Description |
+|---|---|---|
+| `bufferSize` | `"1000000"` | Max samples to capture (each slot = 9 bytes RAM; 1 M ≈ 9 MB) |
+| `channelNames` | `"D0,D1,D2,D3,D4,D5,D6,D7"` | Comma-separated labels written into the VCD file — use signal names for readability (e.g. `"SCL,SDA,CS,MOSI"`) |
+| `filename` | `"wokwi-logic"` | Base name of the downloaded VCD file (web only; VS Code uses `vcdFile` in `wokwi.toml`) |
+| `triggerMode` | `"off"` | `"off"` = capture always; `"edge"` = start when `triggerPin` reaches `triggerLevel`; `"level"` = capture only while `triggerPin` holds `triggerLevel` |
+| `triggerPin` | `"D7"` | Channel that activates the trigger (`"D0"`–`"D7"`) |
+| `triggerLevel` | `"high"` | Trigger threshold: `"high"` or `"low"` |
+
+**Trigger modes summary:**
+
+| `triggerMode` | Behavior |
+|---|---|
+| `"off"` | All data recorded from simulation start |
+| `"edge"` | Recording starts when `triggerPin` transitions to `triggerLevel`; continues until simulation ends |
+| `"level"` | Recording starts on that transition, pauses when `triggerPin` changes again |
+
+```json
+{ "type": "wokwi-logic-analyzer", "id": "logic1", "top": 38, "left": 355,
+  "attrs": { "channelNames": "SCL,SDA,CS,MOSI,MISO" } }
+```
+
+Minimal wiring — just GND and the channels you need:
+```json
+["uno:GND.2",  "logic1:GND", "black",  []],
+["uno:A5",     "logic1:D0",  "gold",   []],
+["uno:A4",     "logic1:D1",  "green",  []],
+["uno:13",     "logic1:D2",  "orange", []]
+```
+
+> The logic analyzer saves a `.vcd` file when you stop the simulation. Open it in PulseView (free, cross-platform) or any VCD viewer. In VS Code, configure the output path with `vcdFile = "wokwi.vcd"` in `wokwi.toml`.
+
+---
+
 > Niche components (steppers, shift registers, RFID, matrix displays, joystick, RTC, NeoPixel, SH1107, HX711 load cell, ILI9341 TFT, IR receiver/remote, DPDT relay, KY-040 rotary encoder) → `/wokwi-diagram-extended`
 
 ---
