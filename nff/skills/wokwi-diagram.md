@@ -368,9 +368,23 @@ Attrs: `"volume"` (default `"1.0"`, use `"0.1"` for quiet simulation). `"mode"`:
 
 ---
 
-### wokwi-lcd1602 / wokwi-lcd2004 (I2C LCD)
+### wokwi-lcd1602 / wokwi-lcd2004 (character LCD)
 
-Character LCD: 16×2 (`wokwi-lcd1602`) or 20×4 (`wokwi-lcd2004`). Set `attrs: { "pins": "i2c" }` to use I2C mode (default is parallel — always use I2C in Wokwi).
+16×2 (`wokwi-lcd1602`) or 20×4 (`wokwi-lcd2004`) HD44780 character LCD. Supports two wiring modes controlled by the `pins` attr.
+
+| Attr | Default | Description |
+|---|---|---|
+| `pins` | `"full"` | `"full"` = standard parallel, `"i2c"` = I2C via PCF8574T |
+| `i2cAddress` | `"0x27"` | I2C address (I2C mode only) |
+| `color` | `"black"` | Text color |
+| `background` | `"green"` | Backlight color (e.g. `"blue"` with `"white"` text) |
+| `variant` | `"A00"` | Font ROM: `"A00"` (Japanese katakana), `"A02"` (Western European + Cyrillic) |
+
+---
+
+#### I2C mode (`"pins": "i2c"`) — preferred, 2 wires
+
+Library: `LiquidCrystal_I2C`. Default address `0x27`.
 
 | Pin | Role |
 |---|---|
@@ -380,16 +394,64 @@ Character LCD: 16×2 (`wokwi-lcd1602`) or 20×4 (`wokwi-lcd2004`). Set `attrs: {
 | `SCL` | I2C clock |
 
 ```json
-{ "type": "wokwi-lcd2004", "id": "lcd1", "top": 100, "left": 200, "attrs": { "pins": "i2c" } }
+{ "type": "wokwi-lcd1602", "id": "lcd1", "top": 100, "left": 200, "attrs": { "pins": "i2c" } }
 ```
 
-ESP32 wiring (I2C default D21/D22):
+Arduino Uno (I2C — SDA = A4, SCL = A5):
 ```json
-["lcd1:SDA", "esp:D21",   "green", []],
-["lcd1:SCL", "esp:D22",   "gold",  []],
-["lcd1:VCC", "esp:VIN",   "red",   []],
-["lcd1:GND", "esp:GND.1", "black", []]
+["lcd1:VCC", "uno:5V",    "red",   []],
+["lcd1:GND", "uno:GND.1", "black", []],
+["lcd1:SDA", "uno:A4",    "blue",  []],
+["lcd1:SCL", "uno:A5",    "gold",  []]
 ```
+
+ESP32 (I2C — SDA = D21, SCL = D22):
+```json
+["lcd1:VCC", "esp:VIN",   "red",   []],
+["lcd1:GND", "esp:GND.1", "black", []],
+["lcd1:SDA", "esp:D21",   "blue",  []],
+["lcd1:SCL", "esp:D22",   "gold",  []]
+```
+
+---
+
+#### Standard mode (`"pins": "full"`) — 4-bit parallel, 6 wires to MCU
+
+Library: `LiquidCrystal(RS, E, D4, D5, D6, D7)`. **Always connect `RW` to GND.** `V0` (contrast) and `D0`–`D3` are not needed in 4-bit mode.
+
+| Pin | Role | Notes |
+|---|---|---|
+| `VSS` | Ground | |
+| `VDD` | Power (5V) | |
+| `V0` | Contrast | Not simulated — leave unconnected |
+| `RS` | Command / data select | Any digital pin |
+| `RW` | Read / Write | **Must connect to GND** |
+| `E` | Enable | Any digital pin |
+| `D4`–`D7` | Data (4-bit mode) | Any digital pins |
+| `D0`–`D3` | Data (8-bit mode) | Leave unconnected in 4-bit mode |
+| `A` | Backlight anode | 5V (or GPIO for dimming) |
+| `K` | Backlight cathode | GND |
+
+```json
+{ "type": "wokwi-lcd1602", "id": "lcd1", "top": 100, "left": 200, "attrs": {} }
+```
+
+Arduino Uno wiring (RS=12, E=11, D4=10, D5=9, D6=8, D7=7):
+```json
+["lcd1:VSS", "uno:GND.1", "black",  []],
+["lcd1:VDD", "uno:5V",    "red",    []],
+["lcd1:RW",  "uno:GND.1", "black",  []],
+["lcd1:RS",  "uno:12",    "blue",   []],
+["lcd1:E",   "uno:11",    "purple", []],
+["lcd1:D4",  "uno:10",    "green",  []],
+["lcd1:D5",  "uno:9",     "brown",  []],
+["lcd1:D6",  "uno:8",     "gold",   []],
+["lcd1:D7",  "uno:7",     "gray",   []],
+["lcd1:A",   "uno:5V",    "red",    []],
+["lcd1:K",   "uno:GND.1", "black",  []]
+```
+
+> Custom characters: use `lcd.createChar(index, bitmap)` (indexes 0–7), print with `lcd.write(index)`. Characters can be updated at runtime for simple animations.
 
 ---
 
