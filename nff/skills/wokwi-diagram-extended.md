@@ -1709,6 +1709,48 @@ ESP32 wiring (OUT on GPIO34 — ADC-only pin):
 
 ---
 
+### wokwi-tm1637-7segment (TM1637 4-digit 7-segment display)
+
+4-digit 7-segment display driven by the TM1637 chip over a 2-wire interface (CLK + DIO). Not I2C-compatible — use a TM1637-specific library.
+
+| Pin | Role |
+|---|---|
+| `CLK` | Clock input |
+| `DIO` | Bidirectional data (also used for ACK) |
+| `VCC` | Power (5V) |
+| `GND` | Ground |
+
+| Attr | Default | Description |
+|---|---|---|
+| `color` | `"red"` | Segment LED color (e.g. `"green"`, `"blue"`) |
+
+Libraries: `TM1637_RT` (RobTillaart) or `Grove 4-Digit Display`. Both are available in Wokwi's library manager.
+
+```json
+{ "type": "wokwi-tm1637-7segment", "id": "sevseg1", "top": -124, "left": 7,
+  "attrs": { "color": "red" } }
+```
+
+Arduino Uno wiring (CLK=2, DIO=3):
+```json
+["sevseg1:CLK", "uno:2",    "green", []],
+["sevseg1:DIO", "uno:3",    "green", []],
+["sevseg1:VCC", "uno:5V",    "red",   []],
+["sevseg1:GND", "uno:GND.1", "black", []]
+```
+
+Pi Pico wiring (CLK=GP16, DIO=GP17, powered from VBUS):
+```json
+["sevseg1:CLK", "pico:GP16",  "green", []],
+["sevseg1:DIO", "pico:GP17",  "green", []],
+["sevseg1:VCC", "pico:VBUS",  "red",   []],
+["sevseg1:GND", "pico:GND.8", "black", []]
+```
+
+> Any two digital GPIO pins work for CLK/DIO — no hardware I2C/SPI pins required.
+
+---
+
 ### wokwi-pir-motion-sensor (PIR motion sensor)
 
 Passive Infrared motion sensor. `OUT` goes **HIGH** when motion is detected, stays HIGH for `delayTime` seconds, then goes LOW. After going LOW the sensor ignores further input for `inhibitTime` seconds before sensing again.
