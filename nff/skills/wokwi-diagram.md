@@ -329,21 +329,48 @@ Pressing the button connects contact 1 to contact 2. Use any `.l` or `.r` varian
 
 ### wokwi-servo
 
+Range of motion: 0°–180° (hard stops at both ends).
+
 | Pin | Role |
 |---|---|
-| `PWM` | Signal (connect to GPIO) |
-| `V+` | Power (connect to 5V or 3V3) |
+| `PWM` | Control signal (connect to GPIO — use PWM-capable pin) |
+| `V+` | Power (**5V**) |
 | `GND` | Ground |
 
-```json
-{ "type": "wokwi-servo", "id": "srv1", "top": 100, "left": 200, "attrs": { "minAngle": "-90", "maxAngle": "90" } }
-```
+| Attr | Default | Description |
+|---|---|---|
+| `horn` | `"single"` | Horn shape: `"single"`, `"double"`, or `"cross"` |
+| `hornColor` | `"#ccc"` | Horn color (any CSS color, e.g. `"black"` or `"#000088"`) |
 
 ```json
-["esp:D18",    "srv1:PWM", "orange", []],
-["esp:3V3",    "srv1:V+",  "red",    []],
-["esp:GND.1",  "srv1:GND", "black",  []]
+{ "type": "wokwi-servo", "id": "srv1", "top": 200, "left": 400, "attrs": { "horn": "single", "hornColor": "#ccc" } }
 ```
+
+**Arduino Uno wiring (PWM pin 9):**
+```json
+["uno:9",     "srv1:PWM", "orange", []],
+["uno:5V",    "srv1:V+",  "red",    []],
+["uno:GND.1", "srv1:GND", "black",  []]
+```
+
+**ESP32 (`board-esp32-devkit-c-v4`) wiring (pin 18):**
+```json
+["esp:18",    "srv1:PWM", "green", []],
+["esp:5V",    "srv1:V+",  "red",   []],
+["esp:GND.2", "srv1:GND", "black", []]
+```
+
+**Potentiometer knob → servo (Uno, pot on A0, servo on pin 9):**
+```json
+["uno:A0",    "pot1:SIG", "green", []],
+["uno:5V",    "pot1:VCC", "red",   []],
+["uno:GND.1", "pot1:GND", "black", []],
+["uno:9",     "srv1:PWM", "orange",[]],
+["uno:5V",    "srv1:V+",  "red",   []],
+["uno:GND.1", "srv1:GND", "black", []]
+```
+
+> For ESP32 use the built-in LEDC peripheral — see CLAUDE.md for duty values and `ledcAttach` / `ledcWrite` details. The `Servo` library works on Uno/Nano without extra config.
 
 ---
 
