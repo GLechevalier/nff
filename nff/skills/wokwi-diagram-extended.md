@@ -905,6 +905,56 @@ Reads 8 parallel inputs serially. Use to expand input pins. For output expansion
 
 ---
 
+### wokwi-nlsf595 (serial tri-color LED driver)
+
+SPI shift register designed to drive common-anode RGB LEDs. One unit controls 2 RGB LEDs (uses QA–QF); chain two units for up to 5 RGB LEDs via `SQH` → `SI`.
+
+| Pin | Role |
+|---|---|
+| `SI` | Serial data input (connect to MCU GPIO) |
+| `SCK` | Serial clock |
+| `RCK` | Storage / latch clock — pulse to push shift register to outputs |
+| `OE` | Output enable, active low — **connect to GND** to permanently enable |
+| `SCLR` | Reset, active low — **connect to VCC** to disable reset |
+| `QA`–`QH` | Parallel outputs (connect to RGB LED pins via resistors) |
+| `SQH` | Serial output — chain to next unit's `SI` |
+| `VCC` | Power |
+| `GND` | Ground |
+
+**Output mapping for 2 RGB LEDs (common-anode):** LED cathodes connect to `QA`–`QF` via resistors (active low = segment lit). `QG`/`QH` unused for 2-LED configs.
+
+| Output | Role |
+|---|---|
+| `QA` | RGB2 Blue |
+| `QB` | RGB2 Green |
+| `QC` | RGB2 Red |
+| `QD` | RGB1 Blue |
+| `QE` | RGB1 Green |
+| `QF` | RGB1 Red |
+
+```json
+{ "type": "wokwi-nlsf595", "id": "sr1", "top": 102.5, "left": 182.16, "rotate": 90, "attrs": {} }
+```
+
+Arduino Uno wiring (SI=2, SCK=3, RCK=4, OE→GND, SCLR→VCC):
+```json
+["sr1:GND",  "uno:GND.1", "black",  ["h0"]],
+["sr1:VCC",  "uno:5V",    "red",    []],
+["sr1:OE",   "uno:GND.1", "black",  []],
+["sr1:SI",   "uno:2",     "blue",   []],
+["sr1:SCK",  "uno:3",     "purple", []],
+["sr1:RCK",  "uno:4",     "gray",   []]
+```
+
+Wire `QA`–`QF` to RGB LED cathode pins via 220 Ω resistors; connect both `COM` pins to 5V.
+
+**Chaining (shared SCK/RCK — SQH → SI of next chip):**
+```json
+["sr1:SQH", "sr2:SI", "orange", []]
+```
+
+---
+
 ### wokwi-analog-joystick
 
 | Pin | Role |
