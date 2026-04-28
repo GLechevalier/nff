@@ -662,6 +662,57 @@ Adafruit_NeoPixel ring(16, 15, NEO_GRB + NEO_KHZ800);
 
 ---
 
+### wokwi-led-strip (WS2812B NeoPixel strip)
+
+Linear WS2812B NeoPixel strip. Exposes both input and output power/ground pins for easy chaining.
+
+| Pin | Role |
+|---|---|
+| `VDD` | Power input (5V) |
+| `DIN` | Data input (connect to MCU GPIO) |
+| `VSS` | Ground input |
+| `VDD.2` | Power output — connect to next strip's `VDD` when chaining |
+| `DOUT` | Data output — connect to next strip's `DIN` when chaining |
+| `VSS.2` | Ground output — connect to next strip's `VSS` when chaining |
+
+| Attr | Default | Description |
+|---|---|---|
+| `pixels` | `"8"` | Number of LEDs in the strip |
+| `pixelShape` | `""` | `""` = smooth (scaled up); `"square"` = square pixel; `"circle"` = circular pixel |
+| `pixelSize` | `"5050"` | Package size: `"5050"` (23 px), `"3535"` (16 px), `"2020"` (9 px) |
+
+```json
+{ "type": "wokwi-led-strip", "id": "strip1", "top": -74, "left": -297, "attrs": { "pixels": "8" } }
+```
+
+ESP32 wiring (DIN on GPIO 2, 5V power):
+```json
+["strip1:DIN", "esp:2",     "green", []],
+["strip1:VDD", "esp:5V",    "red",   []],
+["strip1:VSS", "esp:GND.2", "black", []]
+```
+
+Chaining two strips (strip 1 output side → strip 2 input side):
+```json
+["strip1:DOUT",  "strip2:DIN",  "green", []],
+["strip1:VDD.2", "strip2:VDD",  "red",   []],
+["strip1:VSS.2", "strip2:VSS",  "black", []]
+```
+
+Library: `Adafruit_NeoPixel`. Pixel index 0 = LED closest to `DIN`.
+
+```cpp
+#include <Adafruit_NeoPixel.h>
+Adafruit_NeoPixel strip(8, 2, NEO_GRB + NEO_KHZ800);
+// setup: strip.begin(); strip.setBrightness(50);
+// set pixel: strip.setPixelColor(i, strip.Color(150, 0, 0));
+// push: strip.show();
+```
+
+> `wokwi-led-strip` vs `wokwi-led-matrix` vs `wokwi-led-ring`: use strip for linear runs, matrix for 2D grids (with optional serpentine layout), ring for circular arrangements. All use `Adafruit_NeoPixel` and chain the same way via `DOUT` → `DIN`.
+
+---
+
 ### board-mfrc522 (RFID/NFC reader)
 
 SPI (Mode 0) RFID reader for 13.56 MHz MIFARE cards. Libraries: `MFRC522` (Miguel Balboa) or `Arduino_MFRC522v2`.
