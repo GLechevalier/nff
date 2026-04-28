@@ -484,14 +484,28 @@ Visual text label — no electrical pins. Use for annotating diagrams.
 
 ---
 
-### wokwi-hc-sr04 (ultrasonic)
+### wokwi-hc-sr04 (ultrasonic distance sensor)
 
 | Pin | Role |
 |---|---|
 | `VCC` | 5V |
 | `GND` | Ground |
-| `TRIG` | Trigger pulse (GPIO output) |
-| `ECHO` | Echo return (GPIO input) |
+| `TRIG` | Trigger — pulse HIGH for ≥10 µs to start measurement |
+| `ECHO` | Echo — HIGH pulse length proportional to distance |
+
+Attr: `"distance"` sets initial distance in cm (default `"400"`, range 2–400).
+
+Distance conversion: `cm = pulseIn(ECHO, HIGH) / 58` · `inches = pulseIn(ECHO, HIGH) / 148`
+
+```json
+{ "type": "wokwi-hc-sr04", "id": "sonar1", "top": 0, "left": 200, "attrs": { "distance": "100" } }
+```
+```json
+["sonar1:VCC",  "uno:5V",    "red",    []],
+["sonar1:GND",  "uno:GND.1", "black",  []],
+["sonar1:TRIG", "uno:3",     "purple", []],
+["sonar1:ECHO", "uno:2",     "green",  []]
+```
 
 ---
 
