@@ -667,6 +667,65 @@ Use `analogRead(A0)` for relative concentration; `digitalRead(8)` reads LOW when
 
 ---
 
+### wokwi-mpu6050 (6-axis IMU — accelerometer + gyroscope)
+
+3-axis accelerometer, 3-axis gyroscope, and temperature sensor in one I2C package.
+
+| Pin | Role |
+|---|---|
+| `VCC` | Power (3.3V) |
+| `GND` | Ground |
+| `SCL` | I2C clock |
+| `SDA` | I2C data |
+| `AD0` | Address select — float = `0x68`, connect to VCC = `0x69` |
+| `INT` | Interrupt output (active low) |
+| `XDA` / `XCL` | Auxiliary I2C master — not implemented in simulator |
+
+| Attr | Default | Description |
+|---|---|---|
+| `accelX` | `"0"` | X acceleration (g-force, 1 g = 9.80665 m/s²) |
+| `accelY` | `"0"` | Y acceleration (g) |
+| `accelZ` | `"1"` | Z acceleration (g) — default 1g simulates sensor lying flat |
+| `rotationX` | `"0"` | X angular rate (deg/s) |
+| `rotationY` | `"0"` | Y angular rate (deg/s) |
+| `rotationZ` | `"0"` | Z angular rate (deg/s) |
+| `temperature` | `"24"` | Temperature (°C) |
+
+All attrs are also available as **automation controls** (type `float`) — use `set-control` in simulation scenarios to animate sensor values at runtime.
+
+```json
+{ "type": "wokwi-mpu6050", "id": "mpu1", "top": 264, "left": 96, "attrs": { "accelZ": "1" } }
+```
+
+Arduino Uno wiring (SDA = A4, SCL = A5, **3.3V power**):
+```json
+["mpu1:VCC", "uno:3.3V",  "red",        []],
+["mpu1:GND", "uno:GND.2", "black",      []],
+["mpu1:SCL", "uno:A5",    "darkorange", []],
+["mpu1:SDA", "uno:A4",    "yellow",     []]
+```
+
+ESP32 wiring (SDA = D21, SCL = D22):
+```json
+["mpu1:VCC", "esp:3V3",   "red",        []],
+["mpu1:GND", "esp:GND.1", "black",      []],
+["mpu1:SCL", "esp:D22",   "darkorange", []],
+["mpu1:SDA", "esp:D21",   "yellow",     []]
+```
+
+Library: `Adafruit MPU6050` (+ `Adafruit_Sensor` + `Wire`). Key calls:
+```cpp
+Adafruit_MPU6050 mpu;
+mpu.begin();                                          // default addr 0x68
+mpu.getAccelerometerSensor()->getEvent(&accel_event); // accel_event.acceleration.x/y/z  [m/s²]
+mpu.getGyroSensor()->getEvent(&gyro_event);           // gyro_event.gyro.x/y/z  [rad/s]
+mpu.getTemperatureSensor()->getEvent(&temp_event);    // temp_event.temperature  [°C]
+```
+
+> For multiple sensors on the same bus, set one to `AD0` = VCC (`0x69`) and leave the other floating (`0x68`). Pass the address to `mpu.begin(0x69)`.
+
+---
+
 ### wokwi-logic-analyzer (8-channel digital logic analyzer)
 
 Captures digital signals to a VCD file for offline analysis. Does not affect circuit behavior — purely observational.
