@@ -276,22 +276,42 @@ Add `"rotate": 90` (or `270`) for vertical orientation.
 
 | Pin | Role |
 |---|---|
-| `1.l` | Side 1 left lead |
-| `1.r` | Side 1 right lead |
-| `2.l` | Side 2 left lead |
-| `2.r` | Side 2 right lead |
+| `1.l` / `1.r` | Contact 1 — left / right lead (always shorted together) |
+| `2.l` / `2.r` | Contact 2 — left / right lead (always shorted together) |
 
-`1.*` and `2.*` are shorted when button is pressed. Typical wiring with `INPUT_PULLUP`:
+Pressing the button connects contact 1 to contact 2. Use any `.l` or `.r` variant — both sides of the same contact are equivalent.
+
+| Attr | Default | Description |
+|---|---|---|
+| `color` | `"red"` | Button color (named or hex) |
+| `label` | `""` | Text displayed below the button |
+| `key` | | Keyboard shortcut — letters/numbers are case-insensitive; special keys (`"Escape"`, `"ArrowUp"`, `"F8"`, `" "`) are case-sensitive |
+| `bounce` | `""` | Default: simulates contact bounce (~10–100 transitions over ~1 ms). Set `"0"` to disable. |
+| `xray` | `""` | Set `"1"` to show internal wiring |
+
+**Active-LOW wiring (INPUT_PULLUP — reads LOW when pressed):**
 ```json
-["esp:D4",  "btn1:1.l", "green", []],
-["esp:GND.1", "btn1:2.l", "black", []]
+["btn1:1.l", "esp:D4",    "green", []],
+["btn1:2.l", "esp:GND.1", "black", []]
 ```
 
+**Active-HIGH wiring (external pull-down, reads HIGH when pressed):**
 ```json
-{ "type": "wokwi-pushbutton", "id": "btn1", "top": 100, "left": 200, "attrs": { "color": "blue", "label": "SET", "bounce": "0" } }
+["btn1:1.r", "uno:5V",    "red",   []],
+["btn1:2.l", "uno:8",     "green", []],
+["btn1:2.l", "r1:1",      "green", []],
+["r1:2",     "uno:GND.2", "black", []]
+```
+> `r1` is a 10 kΩ pull-down resistor.
+
+```json
+{ "type": "wokwi-pushbutton", "id": "btn1", "top": 100, "left": 200,
+  "attrs": { "color": "blue", "label": "SET", "key": "s", "bounce": "0" } }
 ```
 
-Attrs: `"label"` sets a display label. `"bounce": "0"` disables contact bounce. `"key": "q"` binds a keyboard key to press the button (useful for games/demos).
+**Tip:** Ctrl-click (Cmd-click on Mac) to latch the button pressed until the next click — useful when two buttons must be held simultaneously.
+
+**Automation control:** `pressed` (int) — `1` = press, `0` = release.
 
 ---
 
