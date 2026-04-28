@@ -344,20 +344,75 @@ I2C wiring (SDA=PB0, SCL=PB2):
 
 ---
 
-### wokwi-pi-pico (Raspberry Pi Pico)
+### wokwi-pi-pico (Raspberry Pi Pico — RP2040)
 
-| Pin group | Names |
+Dual-core ARM Cortex-M0+ at 133 MHz, 264 KB RAM, flexible PIO. Only a **single core** is simulated.
+
+| Pin group | Names | Notes |
+|---|---|---|
+| Digital GPIO | `GP0`–`GP22` | |
+| Analog+digital | `GP26` (ADC ch 0), `GP27` (ADC ch 1), `GP28` (ADC ch 2) | |
+| Power | `3V3`, `VSYS`, `VBUS` | |
+| Ground | `GND.1`–`GND.8` | physical pins 3, 8, 13, 18, 23, 28, 33, 38 |
+| Hidden (diagram.json only) | `TP4` = GPIO23, `TP5` = GPIO25 + onboard LED | |
+
+**Onboard LED:** GPIO 25 / `LED_BUILTIN` — HIGH = lit.
+
+**`env` attr:**
+
+| Value | Framework |
 |---|---|
-| GPIO | `GP0`–`GP28` |
-| UART default | `GP0` (TX → `$serialMonitor:RX`), `GP1` (RX ← `$serialMonitor:TX`) |
-| Power | `3V3`, `VSYS`, `VBUS`, `GND.1`–`GND.8` |
+| *(omit)* | MicroPython (default) |
+| `"arduino-community"` | Arduino-Pico core |
 
-Attrs: `"env": "arduino-community"` to use Arduino framework instead of MicroPython.
+**Simulated peripherals:** GPIO, PIO (+ PIO Debugger), USB CDC Serial, UART, I2C (master), SPI (master), PWM, DMA (PIO only), Timer, RTC, ADC, GDB debugging.
+Not simulated: ADC temperature sensor (always 0), multi-core, SSI (partial).
 
-Serial monitor:
+**Serial Monitor — USB (default):** USB setup takes time; wait for connection before printing:
+```cpp
+Serial.begin(115200);
+while (!Serial) delay(10);
+Serial.println("Ready");
+```
+
+**Serial Monitor — UART (Serial1 on GP0/GP1):**
 ```json
-["pico:GP0", "$serialMonitor:RX", "", []],
-["pico:GP1", "$serialMonitor:TX", "", []]
+["$serialMonitor:RX", "pico:GP0", "", []],
+["$serialMonitor:TX", "pico:GP1", "", []]
+```
+```cpp
+Serial1.begin(115200);
+Serial1.println("Hello");
+```
+
+```json
+{ "type": "wokwi-pi-pico", "id": "pico", "top": 0, "left": 0, "attrs": { "env": "arduino-community" } }
+```
+
+**Traffic-light wiring (GP1=red, GP5=yellow, GP9=green, direct to LED anodes):**
+```json
+["pico:GND.1", "led1:C", "black", []],
+["pico:GP1",   "led1:A", "red",   []],
+["pico:GND.2", "led2:C", "black", []],
+["pico:GP5",   "led2:A", "gold",  []],
+["pico:GND.3", "led3:C", "black", []],
+["pico:GP9",   "led3:A", "green", []]
+```
+
+**LCD1602 parallel wiring (RS=GP12, E=GP11, D4–D7=GP10–GP7, backlight via 220Ω):**
+```json
+["pico:GND.1", "lcd:VSS", "black",  []],
+["pico:GND.1", "lcd:RW",  "black",  []],
+["pico:GND.1", "lcd:K",   "black",  []],
+["pico:VSYS",  "lcd:VDD", "red",    []],
+["pico:VSYS",  "r1:2",    "red",    []],
+["r1:1",       "lcd:A",   "pink",   []],
+["pico:GP12",  "lcd:RS",  "blue",   []],
+["pico:GP11",  "lcd:E",   "purple", []],
+["pico:GP10",  "lcd:D4",  "green",  []],
+["pico:GP9",   "lcd:D5",  "brown",  []],
+["pico:GP8",   "lcd:D6",  "gold",   []],
+["pico:GP7",   "lcd:D7",  "gray",   []]
 ```
 
 ---
