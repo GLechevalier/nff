@@ -978,3 +978,42 @@ Double Pole Double Throw relay. Two independent poles (P1/P2), each switching be
 > Both poles are independent — use P2/NC2/NO2 to switch a second circuit simultaneously with no extra GPIO pin.
 
 ---
+
+### wokwi-ky-040 (rotary encoder)
+
+KY-040 module, 20 steps per revolution. Internal pull-ups on CLK and DT — no external resistors needed, VCC can be left floating.
+
+| Pin | Role |
+|---|---|
+| `CLK` | Encoder pin A — goes LOW first on CW rotation |
+| `DT` | Encoder pin B — goes LOW first on CCW rotation |
+| `SW` | Push button — shorted to GND when pressed; use `INPUT_PULLUP` |
+| `VCC` | Power (3.3V or 5V) |
+| `GND` | Ground |
+
+**Direction decoding:** when CLK falls LOW, read DT — `HIGH` = clockwise, `LOW` = counterclockwise.
+
+**Keyboard shortcuts** (click encoder first to focus):
+
+| Key | Action |
+|---|---|
+| Right / Up | One step clockwise (hold for continuous) |
+| Left / Down | One step counterclockwise (hold for continuous) |
+| Spacebar | Press button |
+
+> Connect CLK to an interrupt-capable pin and use `attachInterrupt(digitalPinToInterrupt(CLK), handler, FALLING)` — polling in `loop()` misses steps if anything uses `delay()`.
+
+```json
+{ "type": "wokwi-ky-040", "id": "enc1", "top": 0, "left": 200, "attrs": {} }
+```
+
+Arduino Uno wiring (CLK = 2, DT = 3, SW = 4 — CLK/DT on interrupt pins):
+```json
+["enc1:VCC", "uno:5V",    "red",    []],
+["enc1:GND", "uno:GND.2", "black",  []],
+["enc1:CLK", "uno:2",     "blue",   []],
+["enc1:DT",  "uno:3",     "green",  []],
+["enc1:SW",  "uno:4",     "purple", []]
+```
+
+---
