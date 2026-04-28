@@ -90,24 +90,74 @@ Use `INPUT_PULLUP` on MCU pins when `nb` side is GND. Or chain `na` to VCC and u
 
 ### wokwi-led-bar-graph (10-segment LED bar)
 
-10 individual LEDs. Each LED `n` has anode `An` and cathode `Cn`.
+10 individual LEDs in one package. Each LED `n` has anode `An` and cathode `Cn` (n = 1–10, top to bottom).
 
-| Pins | Role |
+| Pin | Role |
 |---|---|
-| `A1`–`A10` | Anodes — typically chained together to VCC |
-| `C1`–`C10` | Cathodes — connect to MCU outputs or switch/driver |
+| `A1`–`A10` | Anodes (positive pins) |
+| `C1`–`C10` | Cathodes (negative pins) |
 
-Attr: `"color"` sets color pattern (e.g. `"BCYR"` = Blue/Cyan/Yellow/Red cycling across segments).
+| Attr | Default | Description |
+|---|---|---|
+| `color` | `"red"` | Color of all segments — named (`"red"`, `"yellow"`, `"green"`, `"lime"`, …), hex (`"#9EFF3C"`), or pattern: `"GYR"` (Green→Yellow→Red top to bottom) or `"BCYR"` (Blue→Cyan→Yellow→Red top to bottom) |
 
-Chain all anodes to VCC, drive cathodes LOW to light each LED:
+---
+
+**Pattern A — anode control (each anode to MCU pin, cathodes via resistors to GND):**
+Drive anode HIGH to light the LED. Use one 220 Ω resistor per cathode.
+
+```json
+{ "type": "wokwi-led-bar-graph", "id": "bar1", "top": 0, "left": 200, "attrs": { "color": "GYR" } }
+```
+```json
+["bar1:A1",  "uno:11", "green", []],
+["bar1:A2",  "uno:10", "green", []],
+["bar1:A3",  "uno:9",  "green", []],
+["bar1:A4",  "uno:8",  "green", []],
+["bar1:A5",  "uno:7",  "green", []],
+["bar1:A6",  "uno:6",  "green", []],
+["bar1:A7",  "uno:5",  "green", []],
+["bar1:A8",  "uno:4",  "green", []],
+["bar1:A9",  "uno:3",  "green", []],
+["bar1:A10", "uno:2",  "green", []],
+["bar1:C1",  "r1:1",   "black", []],
+["bar1:C2",  "r2:1",   "black", []],
+["bar1:C3",  "r3:1",   "black", []],
+["bar1:C4",  "r4:1",   "black", []],
+["bar1:C5",  "r5:1",   "black", []],
+["bar1:C6",  "r6:1",   "black", []],
+["bar1:C7",  "r7:1",   "black", []],
+["bar1:C8",  "r8:1",   "black", []],
+["bar1:C9",  "r9:1",   "black", []],
+["bar1:C10", "r10:1",  "black", []],
+["r1:2",  "r2:2",      "black", []],
+["r2:2",  "r3:2",      "black", []],
+["r3:2",  "r4:2",      "black", []],
+["r4:2",  "r5:2",      "black", []],
+["r5:2",  "r6:2",      "black", []],
+["r6:2",  "r7:2",      "black", []],
+["r7:2",  "r8:2",      "black", []],
+["r8:2",  "r9:2",      "black", []],
+["r9:2",  "r10:2",     "black", []],
+["uno:GND.1", "r1:2",  "black", []]
+```
+
+> `r1`–`r10` are `wokwi-resistor` parts with `"value": "220"`. Chaining all `r*:2` pins together saves wires — one GND connection for all 10 resistors.
+
+---
+
+**Pattern B — cathode control (all anodes chained to VCC, cathodes driven LOW from MCU):**
+Drive cathode LOW to light the LED. Saves MCU pins if the bar never needs individual control.
+
 ```json
 { "type": "wokwi-led-bar-graph", "id": "bar1", "top": 0, "left": 200, "rotate": 90, "attrs": { "color": "BCYR" } }
 ```
 ```json
-["uno:5V",   "bar1:A10", "red",   []],
-["bar1:A10", "bar1:A9",  "red",   []],
-["bar1:C10", "uno:2",    "green", []],
-["bar1:C9",  "uno:3",    "green", []]
+["uno:5V",   "bar1:A1",  "red",   []],
+["bar1:A1",  "bar1:A2",  "red",   []],
+["bar1:A2",  "bar1:A3",  "red",   []],
+["bar1:C1",  "uno:2",    "green", []],
+["bar1:C2",  "uno:3",    "green", []]
 ```
 
 ---
@@ -508,6 +558,59 @@ Configurable WS2812B NeoPixel grid. Single data wire, no per-LED resistors neede
 ["leds1:DIN", "esp:D2",    "green", []],
 ["leds1:VDD", "esp:VIN",   "red",   []],
 ["leds1:VSS", "esp:GND.1", "black", []]
+```
+
+---
+
+### wokwi-led-matrix (WS2812B NeoPixel matrix panel)
+
+Configurable WS2812B NeoPixel matrix. Supports chaining via `DOUT`. Similar to `wokwi-neopixel-canvas` but adds layout, shape, and size options for matching real-world panels.
+
+| Pin | Role |
+|---|---|
+| `DIN` | Data input (connect to MCU GPIO) |
+| `VDD` | Power (5V) |
+| `VSS` | Ground |
+| `DOUT` | Data output — chain to next panel's `DIN` |
+
+| Attr | Default | Description |
+|---|---|---|
+| `rows` | `"8"` | Number of rows |
+| `cols` | `"8"` | Number of columns |
+| `layout` | `""` | `""` = progressive (all rows left-to-right); `"serpentine"` = alternating direction. **Most real WS2812 panels use `"serpentine"`** |
+| `brightness` | `"1"` | Brightness multiplier (e.g. `"6"` for brighter sim output) |
+| `pixelShape` | `""` | `""` = default rendering; `"square"` or `"circle"` |
+| `pixelSize` | `"5050"` | LED package size: `"5050"`, `"3535"`, or `"2020"` |
+
+> `wokwi-led-matrix` vs `wokwi-neopixel-canvas`: use `wokwi-led-matrix` when you need `serpentine` layout, pixel shape/size control, or panel chaining (`DOUT`). Use `wokwi-neopixel-canvas` for simple grids where those features aren't needed.
+
+```json
+{ "type": "wokwi-led-matrix", "id": "matrix1", "top": -54, "left": 63,
+  "attrs": { "rows": "8", "cols": "8", "layout": "serpentine", "brightness": "6" } }
+```
+
+ESP32 wiring (DIN on GPIO 2, 5V power):
+```json
+["matrix1:DIN", "esp:2",     "green", []],
+["matrix1:VDD", "esp:5V",    "red",   []],
+["matrix1:VSS", "esp:GND.2", "black", []]
+```
+
+Chaining two panels (panel 1 DOUT → panel 2 DIN, shared power):
+```json
+["matrix1:DOUT", "matrix2:DIN",  "green", []],
+["matrix1:VDD",  "matrix2:VDD",  "red",   []],
+["matrix1:VSS",  "matrix2:VSS",  "black", []]
+```
+
+Library: `Adafruit_NeoPixel`. Use `NEO_GRB + NEO_KHZ800`. Pixel index 0 = top-left for progressive layout; for serpentine, row 1 goes right-to-left.
+
+```cpp
+#include <Adafruit_NeoPixel.h>
+Adafruit_NeoPixel matrix(8 * 8, 2, NEO_GRB + NEO_KHZ800);
+// setup: matrix.begin(); matrix.setBrightness(50);
+// set pixel: matrix.setPixelColor(i, matrix.Color(0, 0, 150));
+// push: matrix.show();
 ```
 
 ---
