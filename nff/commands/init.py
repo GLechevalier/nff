@@ -33,6 +33,17 @@ console = Console(legacy_windows=False)
 _CLAUDE_DESKTOP_CONFIG = Path.home() / ".claude" / "claude_desktop_config.json"
 _MCP_ENTRY: dict = {"command": "nff", "args": ["mcp"]}
 
+# Wokwi-supported boards shown during simulation onboarding.
+_SIM_BOARDS: list[tuple[str, str]] = [
+    ("arduino:avr:uno",         "Arduino Uno"),
+    ("arduino:avr:mega",        "Arduino Mega 2560"),
+    ("arduino:avr:nano",        "Arduino Nano"),
+    ("arduino:avr:leonardo",    "Arduino Leonardo"),
+    ("esp32:esp32:esp32",       "ESP32 DevKit V1"),
+    ("esp8266:esp8266:generic", "ESP8266"),
+]
+_SIM_BOARD_NAMES: dict[str, str] = {fqbn: name for fqbn, name in _SIM_BOARDS}
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -59,6 +70,173 @@ def _ensure_arduino_cli() -> None:
             f"  [yellow]⚠[/yellow]  Could not auto-install arduino-cli: {exc}\n"
             "  Install manually: https://arduino.github.io/arduino-cli"
         )
+
+
+def _pick_mode() -> int:
+    """Prompt the user to choose real-board or simulation mode. Returns 1 or 2."""
+    console.print()
+    console.print("[bold]How would you like to develop?[/bold]")
+    console.print(
+        "  1. [bold]Real board[/bold]            "
+        "[dim]Connect a physical device via USB[/dim]"
+    )
+    console.print(
+        "  2. [bold]Simulated environment[/bold]  "
+        "[dim]Develop without hardware using Wokwi[/dim]"
+    )
+    console.print()
+    return click.prompt("Select mode", type=click.IntRange(1, 2), default=1)
+
+
+def _pick_sim_board() -> str:
+    """Prompt the user to choose a Wokwi-supported board. Returns the FQBN."""
+    console.print()
+    console.print("[bold]Select a target board for simulation:[/bold]")
+    for i, (fqbn, name) in enumerate(_SIM_BOARDS, 1):
+        console.print(f"  {i}. [bold]{name}[/bold]  [dim]{fqbn}[/dim]")
+    console.print()
+    choice = click.prompt(
+        "Select board",
+        type=click.IntRange(1, len(_SIM_BOARDS)),
+        default=1,
+    )
+    return _SIM_BOARDS[choice - 1][0]
+
+
+def _write_sim_claude_md(fqbn: str, wokwi_chip: str) -> None:
+    """Write the Wokwi simulation CLAUDE.md into the current working directory."""
+    from nff.commands.wokwi import _CLAUDE_MD_TEMPLATE as _wokwi_tmpl  # noqa: PLC0415
+    dest = Path.cwd() / "CLAUDE.md"
+    dest.write_text(
+        _wokwi_tmpl.format(
+            board=fqbn,
+            fqbn=fqbn,
+            fqbn_dotted=fqbn.replace(":", "."),
+            wokwi_chip=wokwi_chip,
+        ),
+        encoding="utf-8",
+    )
+    console.print(
+        f"  [bold green]✓[/bold green] CLAUDE.md written to [bold]{dest}[/bold]"
+    )
+
+
+def _run_sim_init(baud: int, force: bool) -> None:
+    """Handle the simulation-mode onboarding path."""
+    from nff.tools import wokwi as wokwi_tools  # noqa: PLC0415
+
+    fqbn = _pick_sim_board()
+    _ensure_arduino_cli()
+
+    cwd = Path.cwd()
+    toml_path    = cwd / "wokwi.toml"
+    diagram_path = cwd / "diagram.json"
+
+    # Guard against overwriting existing Wokwi project files
+    existing = [p for p in (toml_path, diagram_path) if p.exists()]
+    if existing and not force:
+        for p in existing:
+            console.print(f"  [yellow]⚠[/yellow]  {p.name} already exists.")
+        console.print("    Pass [bold]--force[/bold] to overwrite.")
+        sys.exit(1)
+
+    # Validate FQBN + generate diagram
+    try:
+        diagram = wokwi_tools.generate_diagram(fqbn)
+    except wokwi_tools.WokwiError as exc:
+        console.print(f"  [bold red]✗[/bold red] {exc}")
+        sys.exit(1)
+
+    # Write nff config (port left empty — no physical device)
+    board_name = _SIM_BOARD_NAMES[fqbn]
+    cfg_module.set_default_device(port="", board=board_name, fqbn=fqbn, baud=baud)
+    console.print(
+        f"  [bold green]✓[/bold green] Config written to "
+        f"[bold]{cfg_module.CONFIG_PATH}[/bold]"
+    )
+
+    # Write diagram.json
+    diagram_path.write_text(json.dumps(diagram, indent=2), encoding="utf-8")
+    console.print(
+        f"  [bold green]✓[/bold green] diagram.json written  "
+        f"[dim]({diagram['parts'][0]['type']})[/dim]"
+    )
+
+    # Write wokwi.toml
+    elf_abs = toolchain.elf_path_for(cwd, fqbn)
+    try:
+        elf_rel = elf_abs.relative_to(cwd)
+    except ValueError:
+        elf_rel = elf_abs
+    toml_path.write_text(
+        "[wokwi]\n"
+        "version = 1\n"
+        f'elf = "{elf_rel.as_posix()}"\n'
+        'firmware = ""\n',
+        encoding="utf-8",
+    )
+    console.print(
+        f"  [bold green]✓[/bold green] wokwi.toml written  "
+        f"[dim](elf: {elf_rel.as_posix()})[/dim]"
+    )
+
+    # Write CLAUDE.md (simulation variant)
+    try:
+        _write_sim_claude_md(fqbn=fqbn, wokwi_chip=diagram["parts"][0]["type"])
+    except OSError as exc:
+        console.print(f"  [yellow]⚠[/yellow]  Could not write CLAUDE.md: {exc}")
+
+    # Warn if no Wokwi API token
+    if not wokwi_tools._resolve_token():
+        console.print(
+            "  [yellow]⚠[/yellow]  No Wokwi API token found.\n"
+            "    Get one at [bold]https://wokwi.com/dashboard/ci[/bold] then run:\n"
+            "    [bold]nff wokwi init --token YOUR_TOKEN[/bold]  or  "
+            "[bold]export WOKWI_CLI_TOKEN=...[/bold]"
+        )
+
+    # Install skills + register MCP
+    try:
+        _install_claude_skills()
+    except Exception as exc:
+        console.print(f"  [yellow]⚠[/yellow]  Could not install Claude skills: {exc}")
+
+    if _register_mcp_claude_code():
+        console.print(
+            "  [bold green]✓[/bold green] Registered with Claude Code CLI "
+            "([bold]claude mcp add nff nff mcp[/bold])"
+        )
+    else:
+        console.print(
+            "  [dim]`claude` CLI not found — skipping Claude Code registration.[/dim]\n"
+            "  To register manually: [bold]claude mcp add nff nff mcp[/bold]"
+        )
+
+    try:
+        _update_claude_desktop_config()
+        console.print(
+            f"  [bold green]✓[/bold green] Claude Desktop config updated: "
+            f"[bold]{_CLAUDE_DESKTOP_CONFIG}[/bold]"
+        )
+    except ValueError as exc:
+        console.print(
+            f"  [yellow]⚠[/yellow]  Claude Desktop config has invalid JSON — "
+            f"fix it manually: {exc}\n"
+            f"  Path: {_CLAUDE_DESKTOP_CONFIG}"
+        )
+    except OSError as exc:
+        console.print(
+            f"  [yellow]⚠[/yellow]  Could not write Claude Desktop config: {exc}"
+        )
+
+    console.print()
+    console.print(
+        "  [dim]Next steps:[/dim]\n"
+        f"    1. Write your sketch  [bold]<name>.ino[/bold]\n"
+        f"    2. Compile + sim      [bold]nff flash --sim <name>.ino --board {fqbn}[/bold]\n"
+        f"    3. Visual sim         [bold]nff wokwi run --gui[/bold]\n"
+        f"    4. Add components to [bold]diagram.json[/bold] using the Wokwi VS Code extension"
+    )
 
 
 def _pick_device(devices: list[DetectedDevice]) -> DetectedDevice:
@@ -171,6 +349,13 @@ def _update_claude_desktop_config() -> None:
               help="Overwrite an existing config without prompting.")
 def init(port: str | None, baud: int, force: bool) -> None:
     """Detect a connected board, write config, and register the MCP server."""
+    # When no explicit port is given, prompt for development mode first.
+    if not port:
+        mode = _pick_mode()
+        if mode == 2:
+            _run_sim_init(baud, force)
+            return
+
     _ensure_arduino_cli()
 
     # Guard against overwriting an existing, valid config
