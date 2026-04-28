@@ -868,7 +868,52 @@ Minimal wiring — just GND and the channels you need:
 
 ---
 
-> Niche components (steppers, shift registers, RFID, matrix displays, joystick, RTC, NeoPixel, SH1107, HX711 load cell, ILI9341 TFT, IR receiver/remote, DPDT relay, KY-040 rotary encoder) → `/wokwi-diagram-extended`
+---
+
+### wokwi-stepper-motor
+
+Bipolar stepper motor — 1.8°/step, 200 steps/revolution. Supports half-stepping (0.9°/step). Typically driven by a `wokwi-a4988` driver, but can be wired directly to MCU GPIO pins in simulation (coil current is not simulated).
+
+| Pin | Role |
+|---|---|
+| `A+` | Coil A positive |
+| `A-` | Coil A negative |
+| `B+` | Coil B positive |
+| `B-` | Coil B negative |
+
+| Attr | Default | Description |
+|---|---|---|
+| `display` | `"steps"` | Readout on motor body: `"steps"`, `"angle"` (degrees), or `"none"` |
+| `arrow` | `""` | Show a direction arrow — set to a CSS color e.g. `"orange"` |
+| `gearRatio` | `"1:1"` | Gear ratio — `"1:1"` = 200 steps/rev, `"2:1"` = 400 steps/rev |
+| `size` | `"23"` | NEMA frame size: `"8"`, `"11"`, `"14"`, `"17"`, `"23"`, `"34"` |
+
+```json
+{ "type": "wokwi-stepper-motor", "id": "stepper1", "top": 0, "left": 200,
+  "attrs": { "display": "angle", "arrow": "orange" } }
+```
+
+**Direct GPIO wiring (Arduino Uno, Arduino `Stepper` library — pins 8–11):**
+```json
+["stepper1:A+", "uno:10", "green", []],
+["stepper1:A-", "uno:11", "green", []],
+["stepper1:B+", "uno:9",  "green", []],
+["stepper1:B-", "uno:8",  "green", []]
+```
+```cpp
+#include <Stepper.h>
+Stepper stepper(200, 8, 9, 10, 11);
+// setup: stepper.setSpeed(60); // RPM
+// loop:  stepper.step(200);    // one full revolution
+```
+
+**A4988 driver wiring** — see `wokwi-a4988` in `/wokwi-diagram-extended` for the full driver pin table and microstepping config.
+
+> Libraries: `Stepper` (built-in), `AccelStepper` (acceleration/deceleration support). For `AccelStepper` use `FULL4WIRE` or `HALF4WIRE` mode with pin order `A+, A-, B+, B-`.
+
+---
+
+> Niche components (shift registers, RFID, matrix displays, joystick, RTC, NeoPixel, SH1107, HX711 load cell, ILI9341 TFT, IR receiver/remote, DPDT relay, KY-040 rotary encoder) → `/wokwi-diagram-extended`
 
 ---
 
