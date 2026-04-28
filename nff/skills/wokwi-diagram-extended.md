@@ -535,6 +535,44 @@ Microstepping: MS1=0,MS2=0,MS3=0 → full (200 steps/rev) · MS1=1 → half · M
 
 ---
 
+### wokwi-neopixel (single WS2812 addressable LED)
+
+Single WS2812B/NeoPixel compatible RGB LED. Chain multiple units by connecting `DOUT` → `DIN` of the next; all LEDs are addressed sequentially from a single data line.
+
+| Pin | Role |
+|---|---|
+| `VDD` | Power (5V) |
+| `VSS` | Ground |
+| `DIN` | Data input (connect to MCU GPIO) |
+| `DOUT` | Data output — connect to next NeoPixel's `DIN` when chaining |
+
+No configurable attrs.
+
+> For larger arrays use `wokwi-led-strip`, `wokwi-led-ring`, or `wokwi-led-matrix` instead.
+
+```json
+{ "type": "wokwi-neopixel", "id": "rgb1", "top": 82.9, "left": 133.4, "rotate": 180, "attrs": {} }
+```
+
+ESP32 (`board-esp32-devkit-c-v4`) wiring — DIN on GPIO 5, 5V power:
+```json
+["esp:GND.3", "rgb1:VSS", "black", ["h0"]],
+["esp:5",     "rgb1:DIN", "green", ["h14.44", "v-19.2"]],
+["rgb1:VDD",  "esp:5V",   "red",   ["h0.2", "v122.4", "h-163.2", "v-19.2"]]
+```
+
+Library: `Adafruit_NeoPixel`. Use `NEO_GRB + NEO_KHZ800`.
+
+```cpp
+#include <Adafruit_NeoPixel.h>
+Adafruit_NeoPixel pixel(1, 5, NEO_GRB + NEO_KHZ800);
+// setup: pixel.begin();
+// set color: pixel.setPixelColor(0, pixel.Color(150, 0, 0)); // Red
+// push: pixel.show();
+```
+
+---
+
 ### wokwi-neopixel-canvas (NeoPixel LED matrix)
 
 Configurable WS2812B NeoPixel grid. Single data wire, no per-LED resistors needed.
