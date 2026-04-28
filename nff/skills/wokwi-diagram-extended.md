@@ -1751,6 +1751,52 @@ Pi Pico wiring (CLK=GP16, DIO=GP17, powered from VBUS):
 
 ---
 
+### wokwi-wifi-ap (simulated WiFi access point)
+
+Virtual access point for ESP32 WiFi projects — no pins, no wiring. Place one or more in the `parts` array to create custom networks.
+
+> **Paid feature** — requires Wokwi Hobby+ or Pro plan. Free users connect to the default open `Wokwi-GUEST` network automatically. When any `wokwi-wifi-ap` part is present, `Wokwi-GUEST` is **not** created.
+
+| Attr | Default | Description |
+|---|---|---|
+| `ssid` | `"MyNetwork"` | Network name |
+| `password` | `""` | WPA2-PSK passphrase — empty = open network |
+| `channel` | `"6"` | WiFi channel (1–13) |
+| `internet` | `""` | Internet via Wokwi IoT Gateway — set `"0"` to disable |
+| `bssid` | `""` | MAC address — auto-generated if omitted |
+
+**Common configurations:**
+
+| Scenario | Attrs |
+|---|---|
+| Open network | `{ "ssid": "FreeWiFi" }` |
+| WPA2 secured | `{ "ssid": "HomeNet", "password": "secret123" }` |
+| Local-only (no internet) | `{ "ssid": "LocalOnly", "internet": "0" }` |
+
+```json
+{ "type": "wokwi-wifi-ap", "id": "ap1", "top": 0, "left": 0, "attrs": { "ssid": "HomeWiFi", "password": "mypassword" } }
+```
+
+Add multiple `wokwi-wifi-ap` parts to test WiFi scanning and network selection logic — each appears as a separate network to the ESP32.
+
+**Arduino (ESP32) connection:**
+```cpp
+#include <WiFi.h>
+WiFi.begin("HomeWiFi", "mypassword");
+while (WiFi.status() != WL_CONNECTED) { delay(100); }
+```
+
+**MicroPython connection:**
+```python
+import network, time
+sta = network.WLAN(network.STA_IF)
+sta.active(True)
+sta.connect('HomeWiFi', 'mypassword')
+while not sta.isconnected(): time.sleep(0.1)
+```
+
+---
+
 ### wokwi-pir-motion-sensor (PIR motion sensor)
 
 Passive Infrared motion sensor. `OUT` goes **HIGH** when motion is detected, stays HIGH for `delayTime` seconds, then goes LOW. After going LOW the sensor ignores further input for `inhibitTime` seconds before sensing again.
