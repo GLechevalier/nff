@@ -1301,3 +1301,47 @@ Keypad keypad = Keypad(makeKeymap(keys), rowPins, colPins, ROWS, COLS);
 ```
 
 ---
+
+### wokwi-microsd-card (SPI microSD card)
+
+SPI-interface microSD card socket. Wokwi automatically creates a FAT16 filesystem (up to 8 MB) and pre-populates it with your project files at simulation start.
+
+| Pin | Role |
+|---|---|
+| `CD` | Card detect — LOW when no card present. **Always disconnected in simulation** (card is always inserted). |
+| `DO` | SPI data output (MISO) |
+| `GND` | Ground |
+| `SCK` | SPI clock |
+| `VCC` | Power (5V) |
+| `DI` | SPI data input (MOSI) |
+| `CS` | Chip select (active low) |
+
+No configurable attrs — the filesystem is managed automatically by the simulator.
+
+```json
+{ "type": "wokwi-microsd-card", "id": "sd1", "top": -33, "left": 14, "rotate": 90, "attrs": {} }
+```
+
+Arduino Uno wiring (hardware SPI — SCK=13, MISO=12, MOSI=11, CS=10):
+```json
+["sd1:SCK", "uno:13",    "green", []],
+["sd1:DO",  "uno:12",    "green", []],
+["sd1:DI",  "uno:11",    "green", []],
+["sd1:CS",  "uno:10",    "green", []],
+["sd1:VCC", "uno:5V",    "red",   []],
+["sd1:GND", "uno:GND.1", "black", []]
+```
+
+Libraries: `SD` (built-in Arduino) or `SdFat` (recommended — faster, more features). `SdFat` example:
+```cpp
+#include "SdFat.h"
+SdFat sd;
+void setup() {
+  if (!sd.begin(10, SD_SCK_MHZ(4))) { /* handle error */ }
+  sd.ls(LS_R | LS_SIZE);  // list all files with sizes
+}
+```
+
+> `SD_SCK_MHZ(4)` keeps clock at 4 MHz which is reliable in simulation. `LS_R` recurses subdirectories; `LS_SIZE` prints file sizes. Use `sd.open("file.txt")` / `file.read()` / `file.write()` for file I/O.
+
+---
