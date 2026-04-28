@@ -1514,3 +1514,56 @@ ESP32 wiring (OUT on GPIO34 — ADC-only pin):
 > The simulator supports the `temperature` automation control — use `set-control` in simulation scenarios to animate temperature changes at runtime.
 
 ---
+
+### wokwi-photoresistor-sensor (LDR module)
+
+LDR in series with a 10K resistor. `AO` is an analog voltage that falls as illumination rises. `DO` goes **HIGH in darkness, LOW in light** (threshold-controlled); the onboard DO LED lights when `DO` is LOW.
+
+| Pin | Role |
+|---|---|
+| `VCC` | Power (5V) |
+| `GND` | Ground |
+| `AO` | Analog output — connect to ADC pin |
+| `DO` | Digital output — HIGH = dark, LOW = light |
+
+| Attr | Default | Description |
+|---|---|---|
+| `lux` | `"500"` | Initial illumination (lux) |
+| `threshold` | `"2.5"` | Voltage threshold for `DO` (V) — default ≈ 100 lux |
+| `rl10` | `"50"` | LDR resistance at 10 lux (kΩ) |
+| `gamma` | `"0.7"` | Slope of log(R)/log(lux) curve |
+
+**Lux reference (VCC = 5V, default gamma/rl10):**
+
+| Condition | Lux | analogRead() |
+|---|---|---|
+| Full moon | 0.1 | 1016 |
+| Twilight | 10 | 853 |
+| Office lighting | 400 | 281 |
+| Full daylight | 10 000 | 39 |
+
+**Analog → lux conversion:**
+```cpp
+const float GAMMA = 0.7, RL10 = 50;
+int raw = analogRead(A0);
+float voltage    = raw / 1024.0 * 5;
+float resistance = 2000 * voltage / (1 - voltage / 5);
+float lux        = pow(RL10 * 1e3 * pow(10, GAMMA) / resistance, 1.0 / GAMMA);
+// guard: if (!isfinite(lux)) lux = 0;
+```
+
+```json
+{ "type": "wokwi-photoresistor-sensor", "id": "ldr1", "top": -62.39, "left": 70.26, "attrs": {} }
+```
+
+Arduino Uno wiring (AO on A0, DO on pin 2):
+```json
+["ldr1:VCC", "uno:5V",    "red",   []],
+["ldr1:GND", "uno:GND.1", "black", []],
+["ldr1:AO",  "uno:A0",    "green", []],
+["ldr1:DO",  "uno:2",     "blue",  []]
+```
+
+Automation control: `lux` (float) — set illumination at runtime with `set-control`.
+
+---
