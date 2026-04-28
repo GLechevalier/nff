@@ -1469,3 +1469,48 @@ void setup() {
 > `SD_SCK_MHZ(4)` keeps clock at 4 MHz which is reliable in simulation. `LS_R` recurses subdirectories; `LS_SIZE` prints file sizes. Use `sd.open("file.txt")` / `file.read()` / `file.write()` for file I/O.
 
 ---
+
+### wokwi-ntc-temperature-sensor (NTC thermistor module)
+
+10K NTC thermistor in series with a 10K resistor. `OUT` produces an analog voltage proportional to temperature — read with `analogRead()` on any ADC pin.
+
+| Pin | Role |
+|---|---|
+| `VCC` | Power (3.3V or 5V) |
+| `OUT` | Analog output — connect to ADC pin |
+| `GND` | Ground |
+
+| Attr | Default | Description |
+|---|---|---|
+| `temperature` | `"24"` | Initial temperature (°C) |
+| `beta` | `"3950"` | Beta coefficient of the thermistor — match to your conversion formula |
+
+**Temperature conversion (°C):**
+```cpp
+const float BETA = 3950; // match the beta attr value
+int raw = analogRead(A0);
+float celsius = 1 / (log(1 / (1023.0 / raw - 1)) / BETA + 1.0 / 298.15) - 273.15;
+```
+
+```json
+{ "type": "wokwi-ntc-temperature-sensor", "id": "ntc1", "top": -130.63, "left": 11.15,
+  "attrs": { "beta": "3950", "temperature": "24" } }
+```
+
+Arduino Uno wiring (OUT on A0, powered from VIN):
+```json
+["ntc1:VCC", "uno:VIN",   "red",   []],
+["ntc1:GND", "uno:GND.1", "black", []],
+["ntc1:OUT", "uno:A0",    "green", []]
+```
+
+ESP32 wiring (OUT on GPIO34 — ADC-only pin):
+```json
+["ntc1:VCC", "esp:3V3",   "red",   []],
+["ntc1:GND", "esp:GND.1", "black", []],
+["ntc1:OUT", "esp:D34",   "green", []]
+```
+
+> The simulator supports the `temperature` automation control — use `set-control` in simulation scenarios to animate temperature changes at runtime.
+
+---
