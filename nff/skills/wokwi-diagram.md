@@ -5,6 +5,132 @@ It is the ground-truth pin reference for all Wokwi components.
 
 ---
 
+## ⚠️ MANDATORY — Apply Before Writing Any Diagram
+
+These rules are not optional. Violating them produces diagrams with overlapping wires,
+components placed on the wrong side, or pins that silently do nothing.
+
+### Checklist — Run Through This Every Time
+
+```
+[ ] ESP32 is at left=0, top=0  (never offset it)
+[ ] ALL components are to the RIGHT (left ≥ 200) for right-column GPIOs
+    OR all to the LEFT (left ≈ -150) for left-column GPIOs — NEVER split sides
+[ ] Each component's top ≈ its GPIO pin's top (see height table below)
+[ ] Minimum 40 px vertical gap between component rows (no visual overlap)
+[ ] No two components share the same left AND top values
+[ ] GND uses GND.2 for right-side components, GND.1 for left-side
+[ ] Serial monitor wired: TX0 → $serialMonitor:RX, RX0 → $serialMonitor:TX
+[ ] LED cathode pin is C (NOT K)
+[ ] Buzzer pin 1 = GND side, pin 2 = signal — double-check before writing
+[ ] ESP32 GPIO pins use D prefix: D2, D4, D5 … (NOT GPIO2, NOT 2)
+[ ] GND always has .1 or .2 suffix (NOT esp:GND)
+```
+
+---
+
+### ESP32 DevKit V1 — Pin Height Reference (esp at top=0, left=0)
+
+Place components at the **same top** as the GPIO pin they connect to.
+This produces horizontal wires with no unnecessary diagonals.
+
+| top (px) | LEFT column pin | RIGHT column pin |
+|----------|-----------------|------------------|
+|  30 | 3V3 | VIN |
+|  55 | EN  | **GND.2** |
+|  80 | VP (G36) | D23 |
+| 105 | VN (G39) | D22 |
+| 130 | D34 | TX |
+| 155 | D35 | RX |
+| 180 | D32 | **D19** |
+| 205 | D33 | **D18** |
+| 230 | **D25** | **D5** |
+| 255 | **D26** | **D17** |
+| 280 | **D27** | **D16** |
+| 305 | **D14** | **D4** |
+| 330 | D12 | **D2** |
+| 355 | **GND.1** | D15 |
+| 380 | D13 | D13 |
+
+> Bold = general-purpose GPIO safe to use for outputs/inputs.
+
+---
+
+### Placement Rules
+
+1. **ESP32 at `left=0, top=0` always.** All coordinates are relative to this.
+
+2. **One side per diagram.** Pick right-column GPIOs → put components at `left ≥ 200`.
+   Pick left-column GPIOs → put components at `left ≈ -150`.
+   Never mix: components on the left for some colors and on the right for others.
+
+3. **Match heights.** Set each component's `top` equal to its GPIO pin's top from the
+   table above. A resistor for D19 goes at `top=180`. A button for D4 goes at `top=305`.
+   Short diagonal wires are acceptable; long ones mean something is misplaced.
+
+4. **40 px minimum row gap.** Components spaced less than 40 px overlap visually.
+   When consecutive GPIO pins are only 25 px apart, skip a pin or use every other row.
+
+5. **Logical grouping.** Components that belong together (same game color, same signal
+   channel) must be placed in the same horizontal band. A red LED at `top=180` and its
+   red button at `top=205` are grouped; the same LED at `top=180` and button at `top=355`
+   are not — a reader cannot see the relationship.
+
+---
+
+### Wiring Rules
+
+6. **GPIO → Resistor → LED_A … LED_C → GND.** Never reverse the resistor or skip it.
+   Chain direction must flow away from the MCU pin, never back through the board body.
+
+7. **Buttons: INPUT_PULLUP wiring.** No external pull-up or pull-down resistor needed.
+   ```
+   GPIO pin → btn:1.l     (signal side)
+   GND.2    → btn:2.l     (ground side)
+   ```
+
+8. **Buzzer pin direction.** Pin `1` is the **GND side**. Pin `2` is the **signal**.
+   ```json
+   ["bz1:1", "esp:GND.2", "black",  []],
+   ["bz1:2", "esp:D18",   "orange", []]
+   ```
+
+9. **Color = signal identity.** Use the signal's logical color for its wires
+   (`"red"` for the red-channel signal wire, `"blue"` for blue, etc.).
+   `"black"` is reserved for GND only. Never use `"green"` for every wire.
+
+10. **Waypoints for clean routing.** Use `["v<N>", "*", "h<N>"]` when auto-routing
+    would produce a crossing. A 4 px vertical stagger per adjacent wire prevents overlap:
+    ```json
+    ["esp:D19", "r_red:1",   "red",   ["v-16", "*", "h4"]],
+    ["esp:D18", "r_blue:1",  "blue",  ["v-20", "*", "h4"]]
+    ```
+
+---
+
+### Complete Simon-game-style pattern (reference)
+
+```json
+{ "type": "wokwi-esp32-devkit-v1", "id": "esp", "top": 0, "left": 0 },
+{ "type": "wokwi-resistor",  "id": "r_red",   "top": 180, "left": 200, "attrs": {"value":"220"} },
+{ "type": "wokwi-led",       "id": "led_red",  "top": 180, "left": 280, "attrs": {"color":"red"} },
+{ "type": "wokwi-pushbutton","id": "btn_red",  "top": 205, "left": 380, "attrs": {"color":"red"} }
+```
+```json
+["esp:TX0",      "$serialMonitor:RX", "",      []],
+["esp:RX0",      "$serialMonitor:TX", "",      []],
+["esp:D19",      "r_red:1",           "red",   []],
+["r_red:2",      "led_red:A",         "red",   []],
+["led_red:C",    "esp:GND.2",         "black", []],
+["esp:D18",      "btn_red:1.l",       "red",   []],
+["btn_red:2.l",  "esp:GND.2",         "black", []]
+```
+- LED at `left=200` (resistor inline), button at `left=380` — both ≥ 200 (right side).
+- Red LED on D19 (top=180), red button on D18 (top=205): same horizontal band.
+- Single GND rail: `GND.2` (right column, top=55) for all right-side components.
+
+---
+
 ## diagram.json Structure
 
 ```json
@@ -1006,16 +1132,6 @@ Load `/wokwi-diagram-extended` whenever a diagram requires any of the components
 | `board-st-nucleo-l031k6` | STM32 Nucleo-32 |
 | `board-st-nucleo-c031c6` | STM32 Nucleo-64 |
 | `board-stm32-bluepill` | STM32 Blue Pill |
-
----
-
-## Positioning Tips
-
-- `top` / `left` are canvas pixels; `0,0` is top-left of the first placed part.
-- ESP32 DevKit V1 occupies roughly 160 × 400 px.
-- Place external components to the **right** of the ESP32 (left ≈ 200+) to align with the right-column pins (D2, GND.2, etc.).
-- Place components to the **left** (left ≈ -150) to align with left-column pins (D32, GND.1, etc.).
-- `"rotate": 90` rotates a component 90° clockwise.
 
 ---
 
