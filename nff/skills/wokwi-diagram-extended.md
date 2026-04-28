@@ -856,3 +856,57 @@ ESP32 wiring (hardware SPI — CS = D5, D/C = D4):
 ```
 
 ---
+
+### wokwi-ir-receiver + wokwi-ir-remote (38 kHz infrared)
+
+Always used together. The remote sends NEC-encoded IR signals; the receiver decodes them.
+
+#### wokwi-ir-receiver
+
+| Pin | Role |
+|---|---|
+| `VCC` | Power (5V) |
+| `GND` | Ground |
+| `DAT` | Digital output → MCU input (active low) |
+
+| Attr | Default | Description |
+|---|---|---|
+| `color` | `""` | Visual color of the receiver body (e.g. `"green"`) |
+
+During simulation you can also **click the receiver** to manually send an arbitrary NEC-encoded signal (specify address + command fields in the pop-up UI).
+
+Libraries: `IRremote`, `IRMP`.
+
+```json
+{ "type": "wokwi-ir-receiver", "id": "ir1", "top": 0, "left": 300, "attrs": { "color": "green" } }
+```
+
+```json
+["ir1:VCC", "uno:5V",    "red",   []],
+["ir1:GND", "uno:GND.1", "black", []],
+["ir1:DAT", "uno:2",     "green", []]
+```
+
+#### wokwi-ir-remote
+
+No wiring needed — the remote communicates with the receiver automatically in simulation. Just place it in the `parts` array next to the receiver.
+
+```json
+{ "type": "wokwi-ir-remote", "id": "remote1", "top": 0, "left": 450, "attrs": {} }
+```
+
+**Minimal IR receiver circuit (Uno, DAT on pin 2):**
+```json
+[
+  { "type": "wokwi-arduino-uno",  "id": "uno",     "top": 200, "left": 0,   "attrs": {} },
+  { "type": "wokwi-ir-receiver",  "id": "ir1",     "top": 0,   "left": 100, "attrs": {} },
+  { "type": "wokwi-ir-remote",    "id": "remote1", "top": 0,   "left": 300, "attrs": {} }
+]
+```
+```json
+["ir1:VCC", "uno:5V",    "red",   []],
+["ir1:GND", "uno:GND.1", "black", []],
+["ir1:DAT", "uno:2",     "green", []]
+```
+
+---
