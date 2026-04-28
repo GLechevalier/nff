@@ -615,6 +615,53 @@ Adafruit_NeoPixel matrix(8 * 8, 2, NEO_GRB + NEO_KHZ800);
 
 ---
 
+### wokwi-led-ring (WS2812B NeoPixel ring)
+
+Circular WS2812B NeoPixel ring. Supports chaining via `DOUT`. Same `Adafruit_NeoPixel` library as `wokwi-led-matrix`.
+
+| Pin | Role |
+|---|---|
+| `GND` | Ground |
+| `VCC` | Power (5V) |
+| `DIN` | Data input (connect to MCU GPIO) |
+| `DOUT` | Data output — chain to next ring's `DIN` |
+
+| Attr | Default | Description |
+|---|---|---|
+| `pixels` | `"16"` | Number of LEDs in the ring |
+
+```json
+{ "type": "wokwi-led-ring", "id": "ring1", "top": -18, "left": 30, "attrs": { "pixels": "16" } }
+```
+
+ESP32 wiring (DIN on GPIO 15, 5V power):
+```json
+["ring1:GND", "esp:GND.2", "black", []],
+["ring1:VCC", "esp:5V",    "red",   []],
+["ring1:DIN", "esp:15",    "green", []]
+```
+
+Chaining two rings (ring 1 DOUT → ring 2 DIN, shared power):
+```json
+["ring1:DOUT", "ring2:DIN", "green", []],
+["ring1:VCC",  "ring2:VCC", "red",   []],
+["ring1:GND",  "ring2:GND", "black", []]
+```
+
+Library: `Adafruit_NeoPixel`. Pixel index 0 is the first LED after `DIN` entry point, incrementing clockwise.
+
+```cpp
+#include <Adafruit_NeoPixel.h>
+Adafruit_NeoPixel ring(16, 15, NEO_GRB + NEO_KHZ800);
+// setup: ring.begin(); ring.setBrightness(50);
+// set pixel: ring.setPixelColor(i, ring.Color(0, 150, 0));
+// push: ring.show();
+```
+
+> When chaining, pass the total pixel count to the constructor: `Adafruit_NeoPixel allPixels(16 + 12, PIN, ...)` for a 16-pixel ring chained to a 12-pixel ring.
+
+---
+
 ### board-mfrc522 (RFID/NFC reader)
 
 SPI (Mode 0) RFID reader for 13.56 MHz MIFARE cards. Libraries: `MFRC522` (Miguel Balboa) or `Arduino_MFRC522v2`.
