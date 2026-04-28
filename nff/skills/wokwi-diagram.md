@@ -284,6 +284,23 @@ Add `"rotate": 90` (or `270`) for vertical orientation.
 
 ---
 
+### wokwi-slide-potentiometer
+
+Same pins (`VCC`, `GND`, `SIG`), same `value` attr, same keyboard shortcuts and automation control (`position` float 0.0–1.0) as `wokwi-potentiometer`. Only difference: the `travelLength` attr controls the physical width of the slider.
+
+| Attr | Default | Common values |
+|---|---|---|
+| `travelLength` | `"30"` | `"15"`, `"20"`, `"30"`, `"45"`, `"60"`, `"100"` (mm) |
+
+```json
+{ "type": "wokwi-slide-potentiometer", "id": "pot1", "top": 79, "left": 400,
+  "attrs": { "travelLength": "30", "value": "0" } }
+```
+
+Add `"rotate": 270` to orient the slider vertically (tip at top). Wiring is identical to `wokwi-potentiometer` — see above.
+
+---
+
 ### wokwi-pushbutton
 
 | Pin | Role |
