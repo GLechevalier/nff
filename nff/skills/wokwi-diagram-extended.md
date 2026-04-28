@@ -65,6 +65,50 @@ Floating power/ground nodes — clean up power rail wiring without routing long 
 
 ---
 
+### wokwi-slide-switch (SPDT slide switch — extended)
+
+Pin `2` is the common. The handle position determines which terminal is connected to `2`:
+
+| Handle | Connection |
+|---|---|
+| Left | `1`–`2` shorted |
+| Right | `3`–`2` shorted |
+
+| Attr | Default | Description |
+|---|---|---|
+| `value` | `""` | Initial position: `""` = left (pin 1–2), `"1"` = right (pin 3–2) |
+| `bounce` | `""` | Default: simulates contact bounce. Set `"0"` to disable. |
+
+```json
+{ "type": "wokwi-slide-switch", "id": "sw1", "top": 10, "left": 180, "attrs": { "bounce": "0" } }
+```
+
+**Toggle LED (switch between GND and signal on pin 5):**
+```json
+["sw1:2", "uno:GND.1", "black", []],
+["sw1:3", "uno:5",     "green", []]
+```
+
+**Route signal to one of two LEDs (pin 5 → red LED in left, green LED in right):**
+```json
+["sw1:1", "led1:A",    "blue",  []],
+["sw1:2", "r1:1",      "blue",  []],
+["sw1:3", "led2:A",    "blue",  []],
+["r1:2",  "uno:13",    "red",   []],
+["uno:GND.1", "led1:C","black", []],
+["uno:GND.1", "led2:C","black", []]
+```
+> `r1` is a 220 Ω current-limiting resistor in series with the common pin.
+
+**Read switch state with MCU (pin 1 → VCC, pin 3 → GND, pin 2 → digital input):**
+```json
+["sw1:1", "esp:3V3",   "red",   []],
+["sw1:3", "esp:GND.1", "black", []],
+["sw1:2", "esp:D4",    "green", []]
+```
+
+---
+
 ### wokwi-dip-switch-8 (8-position DIP switch)
 
 8 independent SPST switches. Each switch `n`: pins `na` (side A) and `nb` (side B) connected when ON. Toggle with keyboard keys `1`–`8` while focused.
