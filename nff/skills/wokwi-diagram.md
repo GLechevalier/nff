@@ -212,18 +212,30 @@ Custom light color example (white body, orange light):
 
 ### wokwi-resistor
 
+> Wokwi has only basic analog simulation — resistors work correctly as pull-ups/pull-downs and in LED current-limiting circuits, but cannot be used in full analog divider calculations with components like potentiometers or NTC sensors.
+
 | Pin | Role |
 |---|---|
 | `1` | Terminal 1 |
 | `2` | Terminal 2 |
 
+| Attr | Default | Common values |
+|---|---|---|
+| `value` | `"1000"` | `"220"` (LED), `"1000"`, `"4700"` (1-Wire pull-up), `"10000"` (pull-up/down) |
+
 ```json
-{ "type": "wokwi-resistor", "id": "r1", "top": 100, "left": 150, "attrs": { "value": "220" } }
+{ "type": "wokwi-resistor", "id": "r1", "top": 100, "left": 150, "rotate": 90, "attrs": { "value": "220" } }
 ```
 
-Common values: `"220"` (LED current limit), `"1000"`, `"10000"` (pull-up/down)
+Add `"rotate": 90` to orient vertically (typical when bridging between two horizontal pins).
 
-Add `"rotate": 90` to orient vertically.
+**External pull-down for active-HIGH button (button → pin 2, GND via R):**
+```json
+["btn1:1.l", "uno:5V",    "red",   []],
+["btn1:2.r", "uno:2",     "green", []],
+["r1:1",     "btn1:2.r",  "green", []],
+["r1:2",     "uno:GND.1", "black", []]
+```
 
 ---
 
