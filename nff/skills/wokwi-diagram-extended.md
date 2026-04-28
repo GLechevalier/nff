@@ -897,28 +897,50 @@ Automation controls: `x` / `y` (float -1 to 1, 0 = center), `pressed` (int 0/1).
 
 ### wokwi-max7219-matrix (LED dot matrix)
 
-8×8 LED matrix driven by MAX7219 over SPI. Supports chaining.
+8×8 LED matrix driven by MAX7219 over SPI. Each unit is one 8×8 grid; chain multiple units for wider displays.
 
 | Pin | Role |
 |---|---|
 | `DIN` | SPI data in |
 | `CS` | Chip select |
 | `CLK` | SPI clock |
-| `V+` | Power (5V) |
-| `GND` | Ground |
+| `V+` | Power (5V) — input side |
+| `GND` | Ground — input side |
+| `DOUT` | SPI data out — connect to next unit's `DIN` for manual chaining |
+| `V+.2` | Power — output side (pass-through for chaining) |
+| `GND.2` | Ground — output side (pass-through for chaining) |
+| `CS.2` | CS — output side (pass-through for chaining) |
+| `CLK.2` | CLK — output side (pass-through for chaining) |
 
-Attr: `"chain": "2"` chains N matrices side-by-side (e.g. `"2"` = 16×8).
+| Attr | Default | Description |
+|---|---|---|
+| `chain` | `"1"` | Number of 8×8 units chained side-by-side (e.g. `"4"` = 32×8). All units share one `type` entry. |
+| `color` | `"red"` | LED color when lit (e.g. `"green"`, `"#ff8800"`) |
+| `layout` | `"parola"` | Pixel wiring pattern: `"parola"` (Parola-compatible modules) or `"fc16"` (FC-16 modules from AliExpress/eBay). Wrong layout = text rotated or mirrored. |
 
+**Single unit or `chain`-based wiring (Arduino Uno, CS=10, DIN=11, CLK=13):**
 ```json
-{ "type": "wokwi-max7219-matrix", "id": "mat1", "top": 0, "left": 200, "attrs": { "chain": "1" } }
+{ "type": "wokwi-max7219-matrix", "id": "mat1", "top": 0, "left": 200, "attrs": { "chain": "4", "layout": "parola" } }
 ```
 ```json
-["mat1:DIN", "uno:11",   "green",  []],
-["mat1:CS",  "uno:10",   "blue",   []],
-["mat1:CLK", "uno:13",   "orange", []],
-["mat1:V+",  "uno:5V",   "red",    []],
-["mat1:GND", "uno:GND.1","black",  []]
+["mat1:DIN", "uno:11",    "orange", []],
+["mat1:CS",  "uno:10",    "green",  []],
+["mat1:CLK", "uno:13",    "blue",   []],
+["mat1:V+",  "uno:5V",    "red",    []],
+["mat1:GND", "uno:GND.1", "black",  []]
 ```
+
+**Manual chaining (separate units — e.g. different colors per row, vertical stacking):**
+Connect `DOUT`→`DIN`, `CLK.2`→`CLK`, `CS.2`→`CS`, and pass-through power via `V+.2`/`GND.2`:
+```json
+["mat1:DOUT",  "mat2:DIN",  "blue",   []],
+["mat1:CLK.2", "mat2:CLK",  "orange", []],
+["mat1:CS.2",  "mat2:CS",   "green",  []],
+["mat1:V+.2",  "mat2:V+",   "red",    []],
+["mat1:GND.2", "mat2:GND",  "black",  []]
+```
+
+> Libraries: `MD_MAX72XX` (low-level) and `MD_Parola` (scrolling text, animations). For FC-16 modules use `MD_MAX72XX::FC16_HW` hardware type in code. The `chain` attr sets the display width — `MD_Parola` constructor must receive the same count.
 
 ---
 
