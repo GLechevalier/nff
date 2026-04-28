@@ -913,7 +913,99 @@ Stepper stepper(200, 8, 9, 10, 11);
 
 ---
 
-> Niche components (shift registers, RFID, matrix displays, joystick, RTC, NeoPixel, SH1107, HX711 load cell, ILI9341 TFT, IR receiver/remote, DPDT relay, KY-040 rotary encoder) → `/wokwi-diagram-extended`
+---
+
+## Extended Component Index
+
+Load `/wokwi-diagram-extended` whenever a diagram requires any of the components below.
+
+### Displays
+| Component | Description |
+|---|---|
+| `board-nokia-5110` | 84×48 monochrome SPI LCD (PCD8544) |
+| `board-grove-oled-sh1107` | 128×128 I2C OLED |
+| `wokwi-ili9341` | 240×320 color SPI TFT |
+| `wokwi-tm1637-7segment` | 4-digit 7-segment, TM1637 2-wire interface |
+| `wokwi-max7219-matrix` | 8×8 LED dot matrix, SPI MAX7219 driver |
+
+### NeoPixel / Addressable LEDs
+| Component | Description |
+|---|---|
+| `wokwi-neopixel` | Single WS2812B RGB pixel |
+| `wokwi-neopixel-canvas` | Configurable WS2812B grid |
+| `wokwi-led-matrix` | WS2812B matrix panel (serpentine layout support) |
+| `wokwi-led-ring` | WS2812B circular ring |
+| `wokwi-led-strip` | WS2812B linear strip |
+| `wokwi-rgb-led` | 5mm common-anode/cathode RGB LED |
+| `wokwi-led-bar-graph` | 10-segment LED bar |
+
+### Sensors
+| Component | Description |
+|---|---|
+| `wokwi-pir-motion-sensor` | PIR motion sensor (digital OUT) |
+| `wokwi-photoresistor-sensor` | LDR module (analog AO + digital DO) |
+| `wokwi-ntc-temperature-sensor` | NTC thermistor module (analog OUT, beta attr) |
+| `wokwi-ds18b20` | 1-Wire digital temperature sensor |
+| `wokwi-hx711` | 24-bit load cell / strain gauge ADC |
+| `wokwi-analog-joystick` | Dual-axis analog joystick + push button |
+
+### Motor Drivers
+| Component | Description |
+|---|---|
+| `wokwi-a4988` | A4988 stepper driver (use with `wokwi-stepper-motor`) |
+| `wokwi-biaxial-stepper` | Concentric dual stepper motor |
+
+### Shift Registers & Drivers
+| Component | Description |
+|---|---|
+| `wokwi-74hc595` | 8-bit SIPO shift register (output expander) |
+| `wokwi-74hc165` | 8-bit PISO shift register (input expander) |
+| `wokwi-nlsf595` | Serial tri-color LED driver (2 RGB LEDs per chip) |
+
+### Input
+| Component | Description |
+|---|---|
+| `wokwi-ky-040` | KY-040 rotary encoder |
+| `wokwi-membrane-keypad` | 4×4 or 4×3 matrix keypad |
+| `wokwi-dip-switch-8` | 8-position DIP switch |
+| `wokwi-slide-switch` | SPDT slide switch (extended wiring patterns) |
+| `wokwi-ir-receiver` + `wokwi-ir-remote` | 38 kHz NEC infrared receiver + remote |
+
+### Switches & Relays
+| Component | Description |
+|---|---|
+| `wokwi-relay-module` | Single-channel relay (NPN/PNP, SPDT) |
+| `wokwi-ks2e-m-dc5` | DPDT relay (two independent poles) |
+
+### Connectivity & Storage
+| Component | Description |
+|---|---|
+| `board-mfrc522` | SPI RFID/NFC reader (13.56 MHz MIFARE) |
+| `wokwi-microsd-card` | SPI microSD socket (FAT16, up to 8 MB) |
+| `wokwi-wifi-ap` | Simulated WiFi access point (ESP32, paid feature) |
+
+### Timing & Logic
+| Component | Description |
+|---|---|
+| `wokwi-ds1307` | I2C RTC module |
+| `wokwi-clock-generator` | Configurable digital clock signal source |
+| `wokwi-gate-not/and/or/xor/nand/nor` | Basic logic gates |
+
+### Power Symbols & Utilities
+| Component | Description |
+|---|---|
+| `wokwi-vcc` / `wokwi-gnd` | Floating power/ground symbols (clean up long power wires) |
+
+### Niche MCUs (pin reference in extended)
+| Board | Description |
+|---|---|
+| `wokwi-attiny85` | ATtiny85 (PB0–PB5) |
+| `wokwi-franzininho` | Franzininho ATtiny85 board |
+| `board-franzininho-wifi` | ESP32-S2 Franzininho WiFi |
+| `wokwi-pi-pico` | Raspberry Pi Pico RP2040 (full pin table + serial modes) |
+| `board-st-nucleo-l031k6` | STM32 Nucleo-32 |
+| `board-st-nucleo-c031c6` | STM32 Nucleo-64 |
+| `board-stm32-bluepill` | STM32 Blue Pill |
 
 ---
 
