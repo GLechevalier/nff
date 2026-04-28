@@ -935,3 +935,46 @@ NEC address is always `0`. Commands and keyboard shortcuts:
 ```
 
 ---
+
+### wokwi-ks2e-m-dc5 (DPDT relay)
+
+Double Pole Double Throw relay. Two independent poles (P1/P2), each switching between a Normally Closed (NC) and Normally Open (NO) contact.
+
+| Pin | Role |
+|---|---|
+| `COIL1` | Coil terminal 1 — connect to MCU GPIO (or transistor collector) |
+| `COIL2` | Coil terminal 2 — connect to GND |
+| `P1` | Pole 1 (common) |
+| `NC1` | Normally closed 1 — connected to P1 when coil **un**powered |
+| `NO1` | Normally open 1 — connected to P1 when coil powered |
+| `P2` | Pole 2 (common) |
+| `NC2` | Normally closed 2 — connected to P2 when coil **un**powered |
+| `NO2` | Normally open 2 — connected to P2 when coil powered |
+
+**State summary:**
+
+| Coil | P1 connects to | P2 connects to |
+|---|---|---|
+| Unpowered | `NC1` | `NC2` |
+| Powered | `NO1` | `NO2` |
+
+```json
+{ "type": "wokwi-ks2e-m-dc5", "id": "relay1", "top": 0, "left": 200, "attrs": {} }
+```
+
+**Basic example — GPIO controls which LED lights (red = off, green = on):**
+```json
+["relay1:COIL1", "uno:13",    "purple", []],
+["relay1:COIL2", "uno:GND.1", "black",  []],
+["relay1:P1",    "uno:5V",    "red",    []],
+["relay1:NC1",   "r1:1",      "gray",   []],
+["relay1:NO1",   "r2:1",      "gray",   []],
+["r1:2",         "led1:A",    "gray",   []],
+["led1:C",       "uno:GND.1", "black",  []],
+["r2:2",         "led2:A",    "gray",   []],
+["led2:C",       "uno:GND.1", "black",  []]
+```
+
+> Both poles are independent — use P2/NC2/NO2 to switch a second circuit simultaneously with no extra GPIO pin.
+
+---
