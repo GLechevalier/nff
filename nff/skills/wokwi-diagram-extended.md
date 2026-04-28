@@ -1338,6 +1338,56 @@ NEC address is always `0`. Commands and keyboard shortcuts:
 
 ---
 
+### wokwi-relay-module (single-channel relay module)
+
+Electrically operated SPDT switch. COM switches between NC and NO depending on the IN signal and the `transistor` attr.
+
+| Pin | Role |
+|---|---|
+| `VCC` | Power |
+| `GND` | Ground |
+| `IN` | Control signal from MCU |
+| `COM` | Common (switched) terminal |
+| `NC` | Normally closed — connected to COM when relay is **not** activated |
+| `NO` | Normally open — connected to COM when relay is **activated** |
+
+| Attr | Default | Description |
+|---|---|---|
+| `transistor` | `"npn"` | `"npn"` (active-high): IN high or floating → COM-NC; IN low → COM-NO. `"pnp"` (active-low): IN low or floating → COM-NC; IN high → COM-NO. |
+
+**State table:**
+
+| `transistor` | IN | COM connects to |
+|---|---|---|
+| `"npn"` (default) | HIGH or floating | NC |
+| `"npn"` (default) | LOW | NO |
+| `"pnp"` | LOW or floating | NC |
+| `"pnp"` | HIGH | NO |
+
+```json
+{ "type": "wokwi-relay-module", "id": "relay1", "top": 0, "left": 200, "attrs": {} }
+```
+
+Basic wiring — MCU drives IN, load switched on COM/NC/NO:
+```json
+["relay1:VCC", "uno:5V",    "red",   []],
+["relay1:GND", "uno:GND.1", "black", []],
+["relay1:IN",  "uno:8",     "green", []]
+```
+
+Switching two LEDs (orange on NC = default on, green on NO = activates when IN goes LOW):
+```json
+["relay1:COM", "vcc2:VCC",  "red",   []],
+["relay1:NC",  "led1:A",    "gold",  []],
+["relay1:NO",  "led2:A",    "green", []],
+["led1:C",     "gnd2:GND",  "black", []],
+["led2:C",     "gnd2:GND",  "black", []]
+```
+
+> Use `wokwi-vcc` / `wokwi-gnd` power symbols (see above) to avoid long power wires in the diagram.
+
+---
+
 ### wokwi-ks2e-m-dc5 (DPDT relay)
 
 Double Pole Double Throw relay. Two independent poles (P1/P2), each switching between a Normally Closed (NC) and Normally Open (NO) contact.
