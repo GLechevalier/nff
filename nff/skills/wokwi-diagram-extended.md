@@ -804,3 +804,55 @@ Automation control: `load` (float, kg) — sets the simulated weight.
 ```
 
 ---
+
+### wokwi-ili9341 (240×320 color TFT LCD)
+
+Full-color 2.8" SPI TFT display. **RST and LED (backlight) pins are not simulated — do not wire them.** MISO can be left unconnected unless reading data back from the display.
+
+| Pin | Role | Notes |
+|---|---|---|
+| `VCC` | Power (5V) | |
+| `GND` | Ground | |
+| `CS` | SPI chip select | Any digital pin |
+| `RST` | Reset | **Not simulated — leave unconnected** |
+| `D/C` | Data / command | Any digital pin |
+| `MOSI` | SPI data MCU → LCD | |
+| `SCK` | SPI clock | |
+| `LED` | Backlight | **Not simulated — leave unconnected** |
+| `MISO` | SPI data LCD → MCU | Optional — omit if not reading back |
+
+| Attr | Default | Description |
+|---|---|---|
+| `flipHorizontal` | `""` | Set `"1"` to flip display horizontally |
+| `flipVertical` | `""` | Set `"1"` to flip display vertically |
+| `swapXY` | `""` | Set `"1"` to swap X/Y axes |
+
+Libraries: `Adafruit_ILI9341` (with `Adafruit_GFX`), `lcdgfx`.
+
+```json
+{ "type": "wokwi-ili9341", "id": "lcd1", "top": 0, "left": 200, "attrs": {} }
+```
+
+Arduino Uno wiring (CS = 10, D/C = 9 — these can be any digital pins):
+```json
+["lcd1:VCC",  "uno:5V",    "red",       []],
+["lcd1:GND",  "uno:GND.1", "black",     []],
+["lcd1:SCK",  "uno:13",    "green",     []],
+["lcd1:MOSI", "uno:11",    "green",     []],
+["lcd1:MISO", "uno:12",    "limegreen", []],
+["lcd1:CS",   "uno:10",    "orange",    []],
+["lcd1:D/C",  "uno:9",     "purple",    []]
+```
+
+ESP32 wiring (hardware SPI — CS = D5, D/C = D4):
+```json
+["lcd1:VCC",  "esp:3V3",   "red",       []],
+["lcd1:GND",  "esp:GND.1", "black",     []],
+["lcd1:SCK",  "esp:D18",   "green",     []],
+["lcd1:MOSI", "esp:D23",   "green",     []],
+["lcd1:MISO", "esp:D19",   "limegreen", []],
+["lcd1:CS",   "esp:D5",    "orange",    []],
+["lcd1:D/C",  "esp:D4",    "purple",    []]
+```
+
+---

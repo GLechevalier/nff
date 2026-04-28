@@ -576,7 +576,7 @@ Use `analogRead(A0)` for relative concentration; `digitalRead(8)` reads LOW when
 
 ---
 
-> Niche components (steppers, shift registers, RFID, matrix displays, joystick, RTC, NeoPixel, SH1107, HX711 load cell) → `/wokwi-diagram-extended`
+> Niche components (steppers, shift registers, RFID, matrix displays, joystick, RTC, NeoPixel, SH1107, HX711 load cell, ILI9341 TFT) → `/wokwi-diagram-extended`
 
 ---
 
