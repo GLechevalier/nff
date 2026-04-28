@@ -5,29 +5,49 @@ Use this skill whenever you need to write, compile, simulate, or flash a sketch.
 
 ---
 
+## ⚠️ MANDATORY — Before Writing Any Sketch
+
+Run through this checklist every time before touching a `.ino` file.
+
+```
+[ ] Identify the target board and its FQBN (see table in pipeline section)
+[ ] Confirm sketches/<name>/<name>.ino does not already exist (avoid silent overwrites)
+[ ] Open diagram.json and extract the full GPIO map:
+      - list every component id, its type, and which esp:D<N> pin it connects to
+      - note which components need special APIs (servo → LEDC, buzzer → tone(), etc.)
+[ ] Resolve INPUT_PULLUP logic up front:
+      buttons wired btn:1.l → GPIO, btn:2.l → GND
+      read as LOW = pressed, HIGH = released — no exceptions
+[ ] Decide blocking vs non-blocking before writing a single line:
+      - single action with known duration → delay() is fine
+      - concurrent inputs/outputs (read button WHILE showing LED sequence) → millis() state machine, NO delay()
+[ ] Set a baud rate for Serial.begin() and write it down — it must match ~/.nff/config.json
+[ ] Confirm no external library is needed. If one is, stop and ask the user to install it first.
+      Built-in only: Wire, SPI, EEPROM, Preferences, tone(), ledcAttach/ledcWrite
+[ ] Never pass raw code to MCP tools — file on disk is the only valid input
+      WRONG: mcp__nff__flash(code="void setup()...")
+      RIGHT: Write .ino file with Write tool → nff flash sketches/<name>
+```
+
+---
+
 ## Core Rules
 
 - **Always use `nff flash` to compile/flash** — never call `arduino-cli` directly.
 - **Never install libraries with `arduino-cli lib install`** — write sketches that use built-in APIs only, or ask the user to install the library first.
 - For ESP32 servo control use `ledcAttach` / `ledcWrite` (built-in LEDC, no library needed).
-- The working directory for all `nff` commands is the project root (where `wokwi.toml` lives).
+- The working directory for all `nff` commands is the sketch folder (where `wokwi.toml` lives).
 
 ### Sketch-First Rule (mandatory — no exceptions)
 
 **Before flashing anything, the sketch must exist as a real file on disk.**
 
-1. Check whether `sketches/` exists in the project root. If not, create it.
-2. Write the sketch to `sketches/<name>/<name>.ino` using the Write tool (the folder name must match the `.ino` filename — arduino-cli requirement).
-3. Only then flash the path to that file.
+1. Check whether `sketches/<name>/` exists. If not, create it.
+2. Write the sketch to `sketches/<name>/<name>.ino` using the Write tool.
+   The folder name must match the `.ino` filename — arduino-cli requirement.
+3. Only then flash the path to that folder.
 
-**Never pass raw code strings to MCP tools.** The `code` parameter on `mcp__nff__flash` and `mcp__nff__wokwi_flash` must not be used. Those tools exist for programmatic callers; Claude Code must always write the file first and pass the sketch directory path instead.
-
-```
-WRONG: mcp__nff__flash(code="void setup()...")
-RIGHT: Write file → nff flash sketches/<name>
-```
-
-When iterating on a sketch, edit the `.ino` file with the Edit tool, then re-flash the same path. The file is the source of truth.
+When iterating, use the Edit tool on the `.ino` file and re-flash the same path. The file is the source of truth.
 
 ---
 
@@ -45,28 +65,32 @@ This verifies: arduino-cli, wokwi-cli, Wokwi token, connected device.
 
 ## Full Simulation Pipeline (no hardware)
 
-### Step 1 — Write the sketch to disk
+Two distinct flows: **first run** (everything created from scratch) and **iteration** (sketch already exists).
 
-Check that `sketches/` exists in the project root; create it if not.
-Write the sketch using the Write tool:
+---
+
+### First Run
+
+#### Step 1 — Write the sketch to disk
 
 ```
 sketches/<name>/<name>.ino
 ```
 
-The folder name must match the `.ino` filename (arduino-cli requirement).
-Do not flash until this file exists on disk. When iterating, use the Edit tool on this file and re-flash — never overwrite with a new inline string.
+Use the Write tool. Folder name must match `.ino` filename.
 
-### Step 2 — Initialize Wokwi project (first time only)
+#### Step 2 — Initialize Wokwi project
 
 ```bash
 nff wokwi init --board <fqbn>
 ```
 
-Creates `wokwi.toml` and a minimal `diagram.json` in the project root.
-To add components (LEDs, buttons, servos, sensors), edit `diagram.json` directly.
+Run this **inside** `sketches/<name>/` (it creates `wokwi.toml` and a stub `diagram.json`
+in the current directory). If the diagram has already been designed separately (e.g. via
+`/wokwi-diagram`), overwrite the generated `diagram.json` with the real one.
 
 **Common FQBNs:**
+
 | Board | FQBN |
 |---|---|
 | ESP32 DevKit V1 | `esp32:esp32:esp32` |
@@ -74,43 +98,88 @@ To add components (LEDs, buttons, servos, sensors), edit `diagram.json` directly
 | Arduino Nano | `arduino:avr:nano` |
 | ESP8266 | `esp8266:esp8266:generic` |
 
-### Step 3 — Compile (flash to simulator)
+#### Step 3 — Compile
 
 ```bash
 nff flash --sim sketches/<name> --board <fqbn>
 ```
 
-This compiles the sketch and writes the ELF to:
-`sketches/<name>/build/<fqbn_dotted>/<name>.elf/<name>.ino.elf`
+Compiles the sketch and writes the ELF to:
 
-The headless simulation will time out (expected — there's no button to click). What matters is that compilation succeeds.
+```
+sketches/<name>/build/<fqbn_dotted>/<name>.elf/<name>.ino.elf
+```
 
-### Step 4 — Update `wokwi.toml`
+`<fqbn_dotted>` = FQBN with `:` replaced by `.`
 
-Make sure `wokwi.toml` points to the compiled ELF:
+| FQBN | fqbn_dotted |
+|---|---|
+| `esp32:esp32:esp32` | `esp32.esp32.esp32` |
+| `arduino:avr:uno` | `arduino.avr.uno` |
+| `arduino:avr:nano` | `arduino.avr.nano` |
+
+Full ELF path examples:
+```
+sketches/blink/build/esp32.esp32.esp32/blink.elf/blink.ino.elf
+sketches/simon_game/build/esp32.esp32.esp32/simon_game.elf/simon_game.ino.elf
+```
+
+A timeout error at this step is **expected** — the headless sim starts and immediately times out
+because nothing triggers the program. What matters is that compilation succeeded (exit code 0,
+no `error:` lines in output).
+
+#### Step 4 — Sync `wokwi.toml`
+
+Open `sketches/<name>/wokwi.toml` and confirm the `firmware` path matches the ELF above:
 
 ```toml
 [wokwi]
 version = 1
-firmware = "sketches/<name>/build/<fqbn_dotted>/<name>.elf/<name>.ino.elf"
+firmware = "build/<fqbn_dotted>/<name>.elf/<name>.ino.elf"
+diagram = "diagram.json"
 ```
 
-Where `<fqbn_dotted>` replaces `:` with `.` (e.g. `esp32.esp32.esp32`).
+> The path is **relative** to the folder containing `wokwi.toml` (i.e. `sketches/<name>/`).
+> If `nff wokwi init` generated a different path, fix it now — a wrong firmware path causes
+> a silent "no firmware" failure in the simulator with no helpful error message.
 
-### Step 5 — Run visual simulation
+#### Step 5 — Run visual simulation
 
 ```bash
 nff wokwi run --gui
 ```
 
-Opens `diagram.json` as a new tab in the existing VS Code window and auto-starts the Wokwi simulator after ~3 s.
+Opens `diagram.json` in VS Code and auto-starts the simulator after ~3 s.
+Interact with the circuit (press buttons, watch LEDs) and observe Serial Monitor output.
 
-### Step 6 — Run headless simulation (serial output only)
+#### Step 6 — Headless simulation (capture serial output)
 
 ```bash
-nff wokwi run
 nff wokwi run --timeout 10000 --serial-log output.txt
 ```
+
+`--timeout` in milliseconds. Serial output is written to `output.txt`. Useful for automated
+verification without opening a GUI.
+
+---
+
+### Iteration (sketch already exists)
+
+This is the loop to repeat for every fix or feature addition:
+
+```
+1. Edit .ino  →  Edit tool on sketches/<name>/<name>.ino
+2. Recompile  →  nff flash --sim sketches/<name> --board <fqbn>
+3. Simulate   →  nff wokwi run --gui   (or --serial-log for headless)
+4. If wrong   →  back to step 1
+```
+
+**Do NOT re-run `nff wokwi init`** on iteration — it overwrites `wokwi.toml` and `diagram.json`.
+**Do NOT re-write the `.ino` with Write tool** on iteration — use Edit tool to preserve the file
+and avoid accidentally blanking code you wrote earlier.
+
+Diagram-only change (no code change): skip steps 1–2, just run `nff wokwi run --gui` again.
+The simulator always reads `diagram.json` fresh on each run.
 
 ---
 
@@ -218,13 +287,22 @@ all serial debugging.
 
 ## Debugging Workflow
 
-### Simulation issues
+### Simulation — symptom lookup
 
-1. Compilation error → fix the sketch, re-run `nff flash --sim`
-2. Serial output looks wrong → check `nff wokwi run --serial-log out.txt`, inspect `out.txt`
-3. Component not responding → check `diagram.json` wiring (pin names, connection direction)
-4. Servo wrong angle → verify duty cycle values match the 500–2500 µs Wokwi range
-5. Button not registering → ensure `INPUT_PULLUP` is set and wiring goes `gpio → btn:1.l`, `GND → btn:2.l`
+| Symptom | Cause | Fix |
+|---|---|---|
+| Compilation error | Sketch bug | Fix `.ino`, re-run `nff flash --sim` |
+| Simulator opens but nothing happens | Wrong ELF path in `wokwi.toml` | Check `firmware =` path — must match actual ELF location |
+| Simulator opens but nothing happens | `diagram.json` not in same folder as `wokwi.toml` | Move or symlink `diagram.json` to `sketches/<name>/` |
+| LED never lights | Wiring reversed (resistor after LED, not before) | Check chain: GPIO → R → LED_A … LED_C → GND |
+| LED never lights | Cathode pin named `K` | Change to `C` in `diagram.json` |
+| Button never fires | Active-LOW not handled | `digitalRead(pin) == LOW` means pressed with `INPUT_PULLUP` |
+| Button never fires | Wrong pin wiring side | `btn:1.l` → GPIO, `btn:2.l` → GND — never reversed |
+| Buzzer silent | Pins reversed | `buz1:1` → GND, `buz1:2` → GPIO signal |
+| Servo jerks to wrong angle | Wrong duty values | Use 1638/4915/8192 for −90/0/+90° at 50 Hz 16-bit |
+| Program locks up after first button press | `delay()` inside event handler | Replace with `millis()` state machine |
+| Serial output garbled or empty | Baud mismatch | Match `Serial.begin(N)` ↔ `nff monitor --baud N` ↔ `~/.nff/config.json` |
+| `nff flash --sim` times out | Expected — not an error | Ignore timeout; check only for `error:` lines |
 
 ### Hardware issues
 
