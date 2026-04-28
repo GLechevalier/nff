@@ -576,7 +576,7 @@ Use `analogRead(A0)` for relative concentration; `digitalRead(8)` reads LOW when
 
 ---
 
-> Niche components (steppers, shift registers, RFID, matrix displays, joystick, RTC, NeoPixel, SH1107) → `/wokwi-diagram-extended`
+> Niche components (steppers, shift registers, RFID, matrix displays, joystick, RTC, NeoPixel, SH1107, HX711 load cell) → `/wokwi-diagram-extended`
 
 ---
 
@@ -597,5 +597,5 @@ Use `analogRead(A0)` for relative concentration; `digitalRead(8)` reads LOW when
 | `led1:K` | `led1:C` — Wokwi uses `C` for cathode, not the standard `K` |
 | `esp:GND` | `esp:GND.1` or `esp:GND.2` — always use the numbered suffix |
 | `esp:GPIO2` | `esp:D2` — ESP32 prefixes GPIO numbers with `D` |
-| `esp:TX0` in connections | `esp:TX` — omit the `0` suffix for UART pins |
+| `esp:TX` in connections | `esp:TX0` — don't forget the number suffix for UART pins |
 | `uno:D2` | `uno:2` — Arduino Uno/Mega/Nano use numeric pins, no `D` prefix |

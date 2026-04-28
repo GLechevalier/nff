@@ -770,3 +770,37 @@ Library: `OneWire` + `DallasTemperature`. Call `sensors.requestTemperatures()` t
 ```
 
 ---
+
+### wokwi-hx711 (load cell amplifier)
+
+HX711 24-bit ADC for load cells / strain gauges. Connects via a Wheatstone bridge (E+/E-/A+/A-/B+/B- pins are rendered visually based on `type` attr but are non-interactive in diagram.json — do not wire them).
+
+| Pin | Role |
+|---|---|
+| `VCC` | Power (5V) |
+| `DT` | Serial data out → MCU input |
+| `SCK` | Serial clock → MCU output |
+| `GND` | Ground |
+
+| Attr | Default | Options |
+|---|---|---|
+| `type` | `"50kg"` | `"50kg"`, `"5kg"`, `"gauge"` |
+
+Raw ADC range: 0–2 100 for `"5kg"`, 0–21 000 for `"50kg"`. Channel B and gain settings (32/64/128) are **not simulated**.
+
+Library: `HX711` (Bogdan Necula). Use `scale.begin(DT_PIN, SCK_PIN)`, then `scale.tare()` and `scale.get_units()`.
+
+Automation control: `load` (float, kg) — sets the simulated weight.
+
+```json
+{ "type": "wokwi-hx711", "id": "hx711", "top": 0, "left": 200, "attrs": { "type": "50kg" } }
+```
+
+```json
+["hx711:VCC", "uno:5V",    "red",   []],
+["hx711:GND", "uno:GND.1", "black", []],
+["hx711:DT",  "uno:A1",    "green", []],
+["hx711:SCK", "uno:A0",    "blue",  []]
+```
+
+---
