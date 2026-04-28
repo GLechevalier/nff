@@ -181,13 +181,25 @@ Difference from Uno: adds `A6` and `A7` — **analog input only**, cannot be use
 | `A` | Anode (positive, connect toward GPIO via resistor) |
 | `C` | Cathode (negative, connect to GND) — **NOT `K`** |
 
+| Attr | Default | Description |
+|---|---|---|
+| `color` | `"red"` | LED body color — named (`"red"`, `"green"`, `"blue"`, `"yellow"`, `"white"`, `"orange"`, `"limegreen"`) or hex (`"#FFFF00"`) |
+| `lightColor` | *(derived from `color`)* | Emitted light color override — useful when body color and light color differ (e.g. white body with `"lightColor": "orange"` for warm-white) |
+| `label` | `""` | Text displayed below the LED in the diagram |
+| `gamma` | `"2.8"` | Gamma correction factor — makes low `analogWrite()` values visibly light the LED (mimics real LED behavior). Set `"1.0"` to disable. |
+| `fps` | `"80"` | LED brightness update rate. Lower (e.g. `"30"`) reduces PWM flicker; raise (e.g. `"10000"`) to prevent ghosting in LED scanning / Charlieplexing. |
+| `flip` | `""` | Set `"1"` to mirror the LED horizontally — useful when placing to the left of the MCU |
+
+> To rotate a LED, set `"rotate": 90` (or 180, 270) in the part object.
+
 ```json
 { "type": "wokwi-led", "id": "led1", "top": 100, "left": 200, "attrs": { "color": "red" } }
 ```
 
-Colors: `"red"`, `"green"`, `"blue"`, `"yellow"`, `"white"`, `"orange"`, `"limegreen"`
-
-Attrs: `"flip": "1"` mirrors the LED horizontally (useful when placing left of MCU).
+Custom light color example (white body, orange light):
+```json
+{ "type": "wokwi-led", "id": "led1", "top": 0, "left": 120, "attrs": { "color": "white", "lightColor": "orange", "label": "Status" } }
+```
 
 **Standard blink circuit (GPIO → R → LED → GND):**
 ```json
