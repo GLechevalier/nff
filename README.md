@@ -18,7 +18,7 @@ Claude: [writes sketch] → [updates diagram.json] → [nff flash --sim] → [nf
 
 ### Wokwi Simulation
 
-<video src="public/videos/FirstVideoGithub.mp4" controls width="100%"></video>
+[![Wokwi Simulation](https://img.youtube.com/vi/FZ70lQ-VP3g/maxresdefault.jpg)](https://youtu.be/FZ70lQ-VP3g)
 
 ### Real Hardware
 
