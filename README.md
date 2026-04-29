@@ -2,6 +2,8 @@
 
 **nff** connects [Claude Code](https://claude.ai/code) to embedded hardware over USB — or to simulated hardware via [Wokwi](https://wokwi.com) — with no real board required. It exposes your board as a set of MCP tools so Claude can autonomously write firmware, compile it, upload it, read serial output, and debug, all from a single conversation.
 
+More on  [https://nanoforgeflow.com](https://nanoforgeflow.com)
+
 ```
 you: "Make the LED blink every 200 ms and print the state to serial"
 Claude: [writes sketch] → [compiles] → [uploads to ESP32] → [reads serial] → done
