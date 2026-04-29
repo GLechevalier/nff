@@ -22,8 +22,7 @@ Claude: [writes sketch] → [updates diagram.json] → [nff flash --sim] → [nf
 
 ### Real Hardware
 
-<video src="public/videos/SecondVideoGithub.mp4" controls width="100%"></video>
-
+[![Real Hardware Programming](https://img.youtube.com/vi/JoCwczeRfuQ/maxresdefault.jpg)](https://youtu.be/JoCwczeRfuQ)
 ---
 
 ## Quickstart
