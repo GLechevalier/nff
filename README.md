@@ -14,6 +14,18 @@ Claude: [writes sketch] → [updates diagram.json] → [nff flash --sim] → [nf
 
 ---
 
+## Demo
+
+### Wokwi Simulation
+
+<video src="public/videos/FirstVideoGithub.mp4" controls width="100%"></video>
+
+### Real Hardware
+
+<video src="public/videos/SecondVideoGithub.mp4" controls width="100%"></video>
+
+---
+
 ## Quickstart
 
 ### 1. Install
