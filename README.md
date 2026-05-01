@@ -113,6 +113,7 @@ nff doctor
 | `nff init` | Detect board, write config, register MCP server |
 | `nff flash <file>` | Compile and upload a sketch or sketch directory |
 | `nff monitor` | Stream serial output (Ctrl+C to exit, or `--timeout SECONDS`) |
+| `nff connect` | Attach to a connected device, continuously analyse its logs, and autonomously repair detected issues |
 | `nff doctor` | Check all dependencies and configuration |
 | `nff mcp` | Start the MCP server (called automatically by Claude Code) |
 
@@ -122,7 +123,32 @@ nff flash sketches/sensor_init --board esp32:esp32:esp32 --port COM3
 nff flash sketches/sensor_init --manual-reset    # for boards with broken auto-reset
 nff monitor --port COM10 --baud 115200
 nff monitor --port COM10 --baud 115200 --timeout 15   # stop after 15 seconds
+nff repair
+nff repair --port COM10 --baud 115200
+nff repair --port COM10 --sketch sketches/sensor_init   # re-flash after each fix
 ```
+
+### nff repair — Autonomous log analysis and repair
+
+`nff repair` keeps a live serial connection to your device and hands each batch of log output to Claude for analysis. When Claude detects an error, a hang, unexpected output, or a recoverable fault, it rewrites the relevant sketch, recompiles, reflashes, and resumes monitoring — closing the debug loop without any manual intervention.
+
+```
+nff repair
+  ↓ streams serial from device
+  ↓ Claude analyses each log window
+  ↓ fault detected → sketch rewritten → nff flash → device reset
+  ↓ monitoring resumes automatically
+```
+
+Useful flags:
+
+| Flag | Default | Description |
+|---|---|---|
+| `--port PORT` | auto-detect | Serial port to attach to |
+| `--baud BAUD` | 115200 | Baud rate |
+| `--sketch DIR` | last flashed | Sketch directory to rewrite and reflash on a fix |
+| `--window MS` | 2000 | Log window passed to Claude per analysis cycle |
+| `--max-cycles N` | unlimited | Stop after N repair attempts |
 
 ### Wokwi simulation (CI without a bench)
 
