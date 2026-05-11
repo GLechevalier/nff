@@ -3,7 +3,12 @@
     "allow": [
       "WebSearch",
       "WebFetch(domain:github.com)",
-      "WebFetch(domain:docs.rs)"
+      "WebFetch(domain:docs.rs)",
+      "Bash(cargo build *)",
+      "Bash(Remove-Item config.py, cli.py, mcp_server.py, \"tools\\\\boards.py\", \"tools\\\\serial.py\", \"tools\\\\toolchain.py\", \"tools\\\\installer.py\", \"tools\\\\wokwi.py\", \"tools\\\\wokwi_installer.py\", \"commands\\\\flash.py\", \"commands\\\\init.py\", \"commands\\\\monitor.py\", \"commands\\\\doctor.py\", \"commands\\\\clean.py\", \"commands\\\\connect.py\", \"commands\\\\ota.py\", \"commands\\\\test.py\" -ErrorAction SilentlyContinue)",
+      "Bash(Write-Host \"Deleted. Remaining Python files:\")",
+      "Bash(Get-ChildItem -Recurse -Filter \"*.py\")",
+      "Bash(Select-Object -ExpandProperty FullName)"
     ]
   }
 }

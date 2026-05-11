@@ -1,3 +1,3 @@
-from nff.cli import main
+from nff import run
 
-main()
+run()

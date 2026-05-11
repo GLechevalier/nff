@@ -1,9 +1,8 @@
 use crate::cli::FlashArgs;
-use crate::tools::{config, toolchain};
+use crate::tools::{config, toolchain, wokwi};
 use anyhow::{bail, Result};
 use std::io::{self, BufRead};
 use std::path::Path;
-use which::which;
 
 pub fn run(args: &FlashArgs) -> Result<()> {
     let file = &args.file;
@@ -106,23 +105,40 @@ fn resolve_sketch(path: &Path) -> Result<std::path::PathBuf> {
 }
 
 fn run_simulation(sketch_dir: &Path, fqbn: &str, timeout_ms: u32) -> Result<()> {
-    // Delegate to Python for Wokwi simulation (kept in Python per migration plan)
-    let python = which("python")
-        .or_else(|_| which("python3"))
-        .map_err(|_| anyhow::anyhow!("Python not found — install Python 3.10+ to use --sim"))?;
-
-    let status = std::process::Command::new(&python)
-        .args([
-            "-m", "nff", "flash",
-            sketch_dir.to_str().unwrap_or(""),
-            "--board", fqbn,
-            "--sim",
-            "--sim-timeout", &timeout_ms.to_string(),
-        ])
-        .status()?;
-
-    if !status.success() {
-        bail!("Simulation exited with code {}", status.code().unwrap_or(-1));
+    println!("  Compiling…");
+    let mut compile_stream = toolchain::stream_compile(sketch_dir, fqbn)
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    for line in compile_stream.run().map_err(|e| anyhow::anyhow!("{e}"))? {
+        if !line.trim().is_empty() {
+            println!("    {line}");
+        }
     }
+    if compile_stream.returncode != Some(0) {
+        bail!("Compile failed (exit {:?})", compile_stream.returncode);
+    }
+    println!("  ✓ Compile complete");
+
+    let elf_path = toolchain::elf_path_for(sketch_dir, fqbn);
+
+    let diagram = wokwi::generate_diagram(fqbn).map_err(|e| anyhow::anyhow!("{e}"))?;
+    std::fs::write(
+        sketch_dir.join("diagram.json"),
+        serde_json::to_string_pretty(&diagram)?,
+    )?;
+    wokwi::write_wokwi_toml(sketch_dir, &elf_path).map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    println!("  Simulating…  (timeout: {timeout_ms} ms)");
+    let result = wokwi::run_simulation(sketch_dir, timeout_ms).map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    for line in result.serial_output.lines() {
+        println!("    {line}");
+    }
+
+    if result.exit_code == 0 {
+        println!("  ✓ Simulation complete");
+    } else {
+        bail!("Simulation exited with code {}", result.exit_code);
+    }
+
     Ok(())
 }
