@@ -5,56 +5,168 @@ on:
     branches: [main]
 
 jobs:
-  test-and-release:
-    # Skip when the push is the bot's own version-bump commit.
+  # ── 1. Fast gate ────────────────────────────────────────────────────────────
+  test:
     if: "!startsWith(github.event.head_commit.message, 'chore: bump version')"
     runs-on: ubuntu-latest
-    permissions:
-      contents: write   # needed to push the version commit and tag
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Python deps (no Rust build needed for tests)
+        run: pip install pyserial mcp click rich esptool pytest pytest-asyncio
+      - name: Run tests
+        run: pytest tests/
 
+  # ── 2. Bump version + tag ───────────────────────────────────────────────────
+  bump-version:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      new_version: ${{ steps.bump.outputs.new_version }}
     steps:
       - uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install dependencies
-        run: pip install -e ".[dev]" build twine
-
-      - name: Run tests
-        run: pytest tests/
-
-      - name: Bump patch version
+      - name: Bump patch version in pyproject.toml and Cargo.toml
         id: bump
         run: |
           python - <<'PYEOF' >> $GITHUB_OUTPUT
           import re, pathlib
+
+          # pyproject.toml
           p = pathlib.Path("pyproject.toml")
           text = p.read_text()
           m = re.search(r'version = "(\d+)\.(\d+)\.(\d+)"', text)
           major, minor, patch = m.group(1), m.group(2), int(m.group(3))
           new_version = f"{major}.{minor}.{patch + 1}"
-          p.write_text(re.sub(r'version = "\d+\.\d+\.\d+"', f'version = "{new_version}"', text))
+          p.write_text(re.sub(r'version = "\d+\.\d+\.\d+"', f'version = "{new_version}"', text, count=1))
+
+          # nff/__init__.py
+          ip = pathlib.Path("nff/__init__.py")
+          ip.write_text(re.sub(r'__version__ = "\d+\.\d+\.\d+"', f'__version__ = "{new_version}"', ip.read_text()))
+
+          # nff-rs/nff/Cargo.toml
+          cp = pathlib.Path("nff-rs/nff/Cargo.toml")
+          cp.write_text(re.sub(r'^version = "\d+\.\d+\.\d+"', f'version = "{new_version}"', cp.read_text(), flags=re.MULTILINE))
+
           print(f"new_version={new_version}")
           PYEOF
 
-      - name: Build
-        run: python -m build
-
-      - name: Publish to PyPI
-        env:
-          TWINE_USERNAME: __token__
-          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
-        run: twine upload dist/*
-
-      - name: Commit version bump, tag, and push
+      - name: Commit, tag, push
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add pyproject.toml
+          git add pyproject.toml nff/__init__.py nff-rs/nff/Cargo.toml
           git commit -m "chore: bump version to ${{ steps.bump.outputs.new_version }}"
           git tag v${{ steps.bump.outputs.new_version }}
           git push origin main --follow-tags
+
+  # ── 3. Build platform wheels ────────────────────────────────────────────────
+  build-wheels:
+    needs: bump-version
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            binary: nff
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            binary: nff.exe
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            binary: nff
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v${{ needs.bump-version.outputs.new_version }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build wheel with maturin
+        uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          args: --release --target ${{ matrix.target }} --out dist
+          manylinux: auto
+
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheel-${{ matrix.os }}
+          path: dist/*.whl
+
+      - name: Extract standalone binary from wheel
+        shell: bash
+        run: |
+          pip install wheel
+          python -c "
+          import zipfile, glob, shutil, os, pathlib
+          whl = glob.glob('dist/*.whl')[0]
+          with zipfile.ZipFile(whl) as z:
+              names = z.namelist()
+              binary = next(n for n in names if n.endswith('/${{ matrix.binary }}') or n.endswith('\\\\${{ matrix.binary }}'))
+              data = z.read(binary)
+          out = 'standalone-${{ matrix.binary }}'
+          pathlib.Path(out).write_bytes(data)
+          print('Extracted', out, len(data), 'bytes')
+          "
+          ls -la standalone-* 2>/dev/null || dir standalone-* 2>/dev/null || true
+
+      - name: Upload standalone binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.os }}
+          path: standalone-${{ matrix.binary }}
+
+  # ── 4. Publish to PyPI ──────────────────────────────────────────────────────
+  publish-pypi:
+    needs: [bump-version, build-wheels]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wheel-*
+          merge-multiple: true
+          path: dist/
+
+      - uses: PyO3/maturin-action@v1
+        with:
+          command: upload
+          args: --non-interactive --skip-existing dist/*.whl
+        env:
+          MATURIN_PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
+
+  # ── 5. Create GitHub Release with standalone binaries ──────────────────────
+  publish-release:
+    needs: [bump-version, build-wheels]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: binary-*
+          merge-multiple: true
+          path: binaries/
+
+      - name: Rename binaries with platform suffix
+        run: |
+          mv binaries/nff      binaries/nff-linux-x64    2>/dev/null || true
+          mv binaries/nff.exe  binaries/nff-windows-x64.exe 2>/dev/null || true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.bump-version.outputs.new_version }}
+          files: binaries/*
+          generate_release_notes: true

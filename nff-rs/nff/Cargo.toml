@@ -1,0 +1,28 @@
+[package]
+name = "nff"
+version = "0.2.16"
+edition = "2021"
+
+[[bin]]
+name = "nff"
+path = "src/main.rs"
+
+[dependencies]
+clap        = { version = "4", features = ["derive"] }
+serialport  = "4"
+rusb        = "0.9"
+serde       = { version = "1", features = ["derive"] }
+serde_json  = "1"
+dirs        = "5"
+indicatif   = "0.17"
+console     = "0.15"
+reqwest     = { version = "0.12", features = ["blocking"] }
+zip         = "2"
+flate2      = "1"
+tar         = "0.4"
+which       = "6"
+thiserror   = "1"
+anyhow      = "1"
+
+[target.'cfg(windows)'.dependencies]
+winreg      = "0.52"
