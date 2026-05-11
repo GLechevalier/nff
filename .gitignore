@@ -223,3 +223,6 @@ __marimo__/
 # Wokwi
 diagram.json
 wokwi.toml
+
+renderer/
+**tmp*.json
