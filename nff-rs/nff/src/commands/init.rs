@@ -195,7 +195,7 @@ fn run_sim_init(baud: u32, force: bool) -> Result<()> {
     Ok(())
 }
 
-fn write_success(port: &str, board: &str, device: Option<&boards::DetectedDevice>) {
+fn write_success(_port: &str, _board: &str, device: Option<&boards::DetectedDevice>) {
     if let Some(d) = device {
         let sim = d.wokwi_chip.as_deref().unwrap_or("no Wokwi support");
         println!(

@@ -225,7 +225,10 @@ impl NffServer {
         if !compile_result.success {
             return json_sim_error("", &compile_output, compile_result.returncode);
         }
-        let elf_path = toolchain::elf_path_for(&sketch_dir, &fqbn);
+        let elf_path = match toolchain::locate_compiled_elf(&sketch_dir, &fqbn) {
+            Ok(p) => p,
+            Err(e) => return json_sim_error("", &format!("{compile_output}\nelf locate error: {e}"), 1),
+        };
         let diagram = match wokwi::generate_diagram(&fqbn) {
             Ok(d) => d,
             Err(e) => {
@@ -245,7 +248,7 @@ impl NffServer {
         if let Err(e) = wokwi::write_wokwi_toml(&sketch_dir, &elf_path) {
             return json_sim_error("", &format!("{compile_output}\nwokwi.toml error: {e}"), 1);
         }
-        match wokwi::run_simulation(&sketch_dir, p.timeout_ms) {
+        match wokwi::run_simulation(&sketch_dir, p.timeout_ms, Some(&elf_path)) {
             Ok(r) => json!({
                 "serial_output": r.serial_output,
                 "compile_output": compile_output,
@@ -275,7 +278,10 @@ impl NffServer {
         if !compile_result.success {
             return format!("ERROR: compile failed:\n{}", compile_result.output());
         }
-        let elf_path = toolchain::elf_path_for(&sketch_dir, &fqbn);
+        let elf_path = match toolchain::locate_compiled_elf(&sketch_dir, &fqbn) {
+            Ok(p) => p,
+            Err(e) => return format!("ERROR: {e}"),
+        };
         let diagram = match wokwi::generate_diagram(&fqbn) {
             Ok(d) => d,
             Err(e) => return format!("ERROR: {e}"),
@@ -289,7 +295,7 @@ impl NffServer {
         if let Err(e) = wokwi::write_wokwi_toml(&sketch_dir, &elf_path) {
             return format!("ERROR: {e}");
         }
-        match wokwi::run_simulation(&sketch_dir, p.duration_ms) {
+        match wokwi::run_simulation(&sketch_dir, p.duration_ms, Some(&elf_path)) {
             Ok(r) => r.serial_output,
             Err(e) => format!("ERROR: {e}"),
         }

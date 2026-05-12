@@ -8,9 +8,16 @@ __version__ = "0.2.16"
 
 def run() -> None:
     """Console-script entry point: exec the bundled Rust binary."""
-    _exe = os.path.join(os.path.dirname(os.path.abspath(__file__)), "nff")
+    _pkg = os.path.dirname(os.path.abspath(__file__))
+    # Wheel install: binary bundled alongside __init__.py
+    _exe = os.path.join(_pkg, "nff")
     if sys.platform == "win32":
         _exe += ".exe"
+    # Editable dev install: binary in nff-rs/target/release/
+    if not os.path.isfile(_exe):
+        _exe = os.path.join(os.path.dirname(_pkg), "nff-rs", "target", "release", "nff")
+        if sys.platform == "win32":
+            _exe += ".exe"
     if os.path.isfile(_exe):
         if sys.platform == "win32":
             import subprocess

@@ -9,7 +9,11 @@
       "Bash(Write-Host \"Deleted. Remaining Python files:\")",
       "Bash(Get-ChildItem -Recurse -Filter \"*.py\")",
       "Bash(Select-Object -ExpandProperty FullName)",
-      "Bash(cargo test *)"
+      "Bash(cargo test *)",
+      "Bash(./target/debug/nff mcp *)",
+      "Bash(echo \"EXIT: $?\")",
+      "Bash(\"D:\\\\IntraMap\\\\Carto\\\\R_D\\\\MCPIOT\\\\nff_cli_mcp\\\\nff\\\\nff-rs\\\\target\\\\release\\\\nff.exe\" mcp *)",
+      "Bash(\"D:/IntraMap/Carto/R_D/MCPIOT/nff_cli_mcp/nff/nff-rs/target/release/nff.exe\" mcp *)"
     ]
   }
 }

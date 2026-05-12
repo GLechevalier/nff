@@ -77,24 +77,25 @@ mod tests {
     #[test]
     fn write_wokwi_toml_content_is_valid() {
         let dir = tmp_dir("toml_content");
-        let elf = PathBuf::from("/tmp/build/sketch.elf");
+        // ELF inside the project dir → written as a relative path
+        let elf = dir.join("build").join("arduino.avr.uno").join("sketch.ino.elf");
         write_wokwi_toml(&dir, &elf).unwrap();
         let content = fs::read_to_string(dir.join("wokwi.toml")).unwrap();
         assert!(content.contains("[wokwi]"),     "missing [wokwi] header");
         assert!(content.contains("version = 1"), "missing version");
-        assert!(content.contains("/tmp/build/sketch.elf"), "missing elf path");
+        assert!(content.contains("build/arduino.avr.uno/sketch.ino.elf"), "expected relative elf path");
         assert!(content.contains("firmware = \"\""), "missing firmware key");
         fs::remove_dir_all(dir).ok();
     }
 
     #[test]
-    fn write_wokwi_toml_backslashes_converted() {
-        let dir = tmp_dir("toml_bs");
-        let elf = PathBuf::from(r"C:\Users\user\sketch\build\arduino.avr.uno\sketch.elf");
+    fn write_wokwi_toml_absolute_fallback() {
+        // ELF outside project dir → absolute path written as-is (with forward slashes)
+        let dir = tmp_dir("toml_abs");
+        let elf = PathBuf::from("/unrelated/path/sketch.elf");
         write_wokwi_toml(&dir, &elf).unwrap();
         let content = fs::read_to_string(dir.join("wokwi.toml")).unwrap();
-        assert!(!content.contains('\\'), "backslashes should be converted to forward slashes");
-        assert!(content.contains("C:/Users/user"), "forward-slash path expected");
+        assert!(content.contains("/unrelated/path/sketch.elf"), "expected absolute elf path");
         fs::remove_dir_all(dir).ok();
     }
 
@@ -177,18 +178,30 @@ pub fn generate_diagram(fqbn: &str) -> Result<serde_json::Value, WokwiError> {
 }
 
 pub fn write_wokwi_toml(project_dir: &Path, elf_path: &Path) -> Result<PathBuf, WokwiError> {
-    let elf_str = elf_path.to_string_lossy().replace('\\', "/");
+    // wokwi-cli resolves the elf path relative to the project dir — strip the prefix.
+    let rel = elf_path.strip_prefix(project_dir).unwrap_or(elf_path);
+    let elf_str = rel.to_string_lossy().replace('\\', "/");
     let content = format!("[wokwi]\nversion = 1\nelf = \"{elf_str}\"\nfirmware = \"\"\n");
     let toml_path = project_dir.join("wokwi.toml");
     std::fs::write(&toml_path, content)?;
     Ok(toml_path)
 }
 
-pub fn run_simulation(project_dir: &Path, timeout_ms: u32) -> Result<WokwiResult, WokwiError> {
+/// Run the Wokwi simulator on `project_dir`.
+///
+/// `elf` overrides the ELF path from `wokwi.toml` via `--elf`.  Pass `None`
+/// to let wokwi-cli read the path from `wokwi.toml` (used by `nff wokwi run`).
+/// Pass `Some` after a fresh compile to handle arduino-cli cache-hit scenarios
+/// where `--output-dir` is not populated.
+pub fn run_simulation(project_dir: &Path, timeout_ms: u32, elf: Option<&Path>) -> Result<WokwiResult, WokwiError> {
     let wokwi_cli = toolchain::find_wokwi_cli().ok_or(WokwiError::CliNotFound)?;
 
     let mut cmd = std::process::Command::new(&wokwi_cli);
-    cmd.args(["run", &project_dir.to_string_lossy(), "--timeout", &timeout_ms.to_string()]);
+    cmd.arg("--timeout").arg(timeout_ms.to_string());
+    if let Some(e) = elf {
+        cmd.arg("--elf").arg(e);
+    }
+    cmd.arg(project_dir);
 
     if let Some(token) = resolve_token() {
         cmd.env("WOKWI_CLI_TOKEN", token);

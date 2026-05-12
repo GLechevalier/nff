@@ -7,10 +7,10 @@ param(
     [switch]$Sim
 )
 
-$NFF = ".\nff-rs\target\release\nff.exe"
+$NFF = Join-Path $PSScriptRoot "nff-rs\target\release\nff.exe"
 if (-not (Test-Path $NFF)) {
     Write-Host "Binary not found  - building release first..." -ForegroundColor Yellow
-    Push-Location nff-rs
+    Push-Location (Join-Path $PSScriptRoot "nff-rs")
     cargo build --release
     Pop-Location
 }
@@ -142,19 +142,20 @@ Write-Host "`n--- MCP server (JSON-RPC over stdio) ---" -ForegroundColor Cyan
 
 function Invoke-Mcp {
     param([string[]]$Messages)
-    $input = ($Messages -join "`n") + "`n"
-    $enc = [System.Text.Encoding]::UTF8
     $proc = New-Object System.Diagnostics.Process
-    $proc.StartInfo.FileName = (Resolve-Path $NFF).Path
+    $proc.StartInfo.FileName = $NFF
     $proc.StartInfo.Arguments = "mcp"
     $proc.StartInfo.RedirectStandardInput = $true
     $proc.StartInfo.RedirectStandardOutput = $true
     $proc.StartInfo.RedirectStandardError = $true
     $proc.StartInfo.UseShellExecute = $false
-    $proc.StartInfo.StandardInputEncoding = $enc
-    $proc.StartInfo.StandardOutputEncoding = $enc
     $null = $proc.Start()
-    $proc.StandardInput.Write($input)
+    $enc = [System.Text.Encoding]::UTF8
+    foreach ($msg in $Messages) {
+        $bytes = $enc.GetBytes($msg + "`n")
+        $proc.StandardInput.BaseStream.Write($bytes, 0, $bytes.Length)
+    }
+    $proc.StandardInput.BaseStream.Flush()
     $proc.StandardInput.Close()
     $stdout = $proc.StandardOutput.ReadToEnd()
     $proc.WaitForExit(5000) | Out-Null

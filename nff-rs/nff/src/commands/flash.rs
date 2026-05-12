@@ -94,7 +94,7 @@ fn resolve_sketch(path: &Path) -> Result<std::path::PathBuf> {
     }
 
     // If already inside a correctly-named sketch dir, use parent
-    if path.parent().and_then(|p| p.file_name()) == path.file_stem().map(|s| s) {
+    if path.parent().and_then(|p| p.file_name()) == path.file_stem() {
         return Ok(path.parent().unwrap().to_path_buf());
     }
 
@@ -118,7 +118,8 @@ fn run_simulation(sketch_dir: &Path, fqbn: &str, timeout_ms: u32) -> Result<()> 
     }
     println!("  ✓ Compile complete");
 
-    let elf_path = toolchain::elf_path_for(sketch_dir, fqbn);
+    let elf_path = toolchain::locate_compiled_elf(sketch_dir, fqbn)
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
 
     let diagram = wokwi::generate_diagram(fqbn).map_err(|e| anyhow::anyhow!("{e}"))?;
     std::fs::write(
@@ -128,7 +129,7 @@ fn run_simulation(sketch_dir: &Path, fqbn: &str, timeout_ms: u32) -> Result<()> 
     wokwi::write_wokwi_toml(sketch_dir, &elf_path).map_err(|e| anyhow::anyhow!("{e}"))?;
 
     println!("  Simulating…  (timeout: {timeout_ms} ms)");
-    let result = wokwi::run_simulation(sketch_dir, timeout_ms).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let result = wokwi::run_simulation(sketch_dir, timeout_ms, Some(&elf_path)).map_err(|e| anyhow::anyhow!("{e}"))?;
 
     for line in result.serial_output.lines() {
         println!("    {line}");

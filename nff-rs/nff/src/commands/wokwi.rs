@@ -78,7 +78,7 @@ pub fn run_run(args: &WokwiRunArgs) -> Result<()> {
     println!("  nff wokwi run  —  timeout: {} ms  —  Ctrl+C to abort", args.timeout);
     println!("{}", "─".repeat(60));
 
-    let result = wokwi::run_simulation(&cwd, args.timeout).context("Simulation failed")?;
+    let result = wokwi::run_simulation(&cwd, args.timeout, None).context("Simulation failed")?;
 
     for line in result.serial_output.lines() {
         println!("{line}");

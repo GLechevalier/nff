@@ -11,6 +11,7 @@ pub enum ConfigError {
     #[error("Could not parse config: {0}")]
     Parse(#[from] serde_json::Error),
     #[error("{0}")]
+    #[allow(dead_code)]
     Other(String),
 }
 
@@ -138,12 +139,14 @@ pub fn set_wokwi_token(token: Option<&str>) -> Result<(), ConfigError> {
     save(&config)
 }
 
+#[allow(dead_code)]
 pub fn set_wokwi_diagram_path(path: Option<&str>) -> Result<(), ConfigError> {
     let mut config = load()?;
     config.wokwi.diagram_path = path.map(String::from);
     save(&config)
 }
 
+#[allow(dead_code)]
 pub fn set_wokwi_timeout(ms: u32) -> Result<(), ConfigError> {
     let mut config = load()?;
     config.wokwi.default_timeout_ms = ms;

@@ -9,6 +9,7 @@ pub enum ToolchainError {
     #[error("Executable not found: {0}")]
     NotFound(String),
     #[error("Command timed out: {0}")]
+    #[allow(dead_code)]
     Timeout(String),
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
@@ -137,13 +138,48 @@ pub fn write_sketch(code: &str, sketch_dir_opt: Option<&Path>) -> Result<PathBuf
 pub fn elf_path_for(sketch_dir: &Path, fqbn: &str) -> PathBuf {
     let fqbn_dir = fqbn.replace(':', ".");
     let name = sketch_dir.file_name().unwrap_or_default().to_string_lossy();
-    sketch_dir.join("build").join(&fqbn_dir).join(format!("{name}.elf"))
+    sketch_dir.join("build").join(&fqbn_dir).join(format!("{name}.ino.elf"))
 }
 
 fn require_arduino_cli() -> Result<PathBuf, ToolchainError> {
     find_arduino_cli().ok_or_else(|| ToolchainError::NotFound(
         "arduino-cli not found. Install from https://arduino.github.io/arduino-cli".into(),
     ))
+}
+
+/// Return the path to the compiled ELF, handling arduino-cli's content-hash cache.
+///
+/// arduino-cli >=1.4 only copies artifacts to `--output-dir` on a cache miss.
+/// On cache hits the ELF lives in `%LOCALAPPDATA%/arduino/sketches/<HASH>/`.
+/// We find it by re-running `compile --json` (instant cache hit) and reading
+/// `builder_result.build_path` from the JSON output.
+pub fn locate_compiled_elf(sketch_dir: &Path, fqbn: &str) -> Result<PathBuf, ToolchainError> {
+    let expected = elf_path_for(sketch_dir, fqbn);
+    if expected.is_file() {
+        return Ok(expected);
+    }
+    let exe = require_arduino_cli()?;
+    let name = sketch_dir.file_name().unwrap_or_default().to_string_lossy().into_owned();
+    let out = Command::new(&exe)
+        .args(["compile", "--fqbn", fqbn, "--json",
+               sketch_dir.to_str().unwrap_or("")])
+        .output()?;
+    let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap_or_default();
+    let build_path = json["builder_result"]["build_path"]
+        .as_str()
+        .ok_or_else(|| ToolchainError::NotFound(format!(
+            "ELF not at {} and arduino-cli --json gave no build_path",
+            expected.display()
+        )))?;
+    let elf = PathBuf::from(build_path).join(format!("{name}.ino.elf"));
+    if elf.is_file() {
+        Ok(elf)
+    } else {
+        Err(ToolchainError::NotFound(format!(
+            "ELF not found (tried {} and {})",
+            expected.display(), elf.display()
+        )))
+    }
 }
 
 fn run(cmd: &[&str]) -> Result<RunResult, ToolchainError> {
@@ -167,16 +203,16 @@ fn run(cmd: &[&str]) -> Result<RunResult, ToolchainError> {
 
 pub fn compile_sketch(sketch_dir: &Path, fqbn: &str) -> Result<RunResult, ToolchainError> {
     let exe = require_arduino_cli()?;
-    let build_path = elf_path_for(sketch_dir, fqbn)
+    let output_dir = elf_path_for(sketch_dir, fqbn)
         .parent()
         .unwrap()
         .to_path_buf();
-    std::fs::create_dir_all(&build_path)?;
+    std::fs::create_dir_all(&output_dir)?;
     let cmd_strs = [
         exe.to_str().unwrap_or("arduino-cli"),
         "compile",
         "--fqbn", fqbn,
-        "--build-path", build_path.to_str().unwrap_or(""),
+        "--output-dir", output_dir.to_str().unwrap_or(""),
         sketch_dir.to_str().unwrap_or(""),
     ];
     run(&cmd_strs)
@@ -221,7 +257,7 @@ impl ProcessStream {
         let stdout = child.stdout.take().unwrap();
         let lines: Vec<String> = BufReader::new(stdout)
             .lines()
-            .filter_map(|l| l.ok())
+            .map_while(Result::ok)
             .collect();
         let status = child.wait()?;
         self.returncode = status.code();
@@ -231,16 +267,16 @@ impl ProcessStream {
 
 pub fn stream_compile(sketch_dir: &Path, fqbn: &str) -> Result<ProcessStream, ToolchainError> {
     let exe = require_arduino_cli()?;
-    let build_path = elf_path_for(sketch_dir, fqbn)
+    let output_dir = elf_path_for(sketch_dir, fqbn)
         .parent()
         .unwrap()
         .to_path_buf();
-    std::fs::create_dir_all(&build_path)?;
+    std::fs::create_dir_all(&output_dir)?;
     Ok(ProcessStream::new(vec![
         exe.to_str().unwrap_or("arduino-cli").to_string(),
         "compile".into(),
         "--fqbn".into(), fqbn.into(),
-        "--build-path".into(), build_path.to_str().unwrap_or("").to_string(),
+        "--output-dir".into(), output_dir.to_str().unwrap_or("").to_string(),
         sketch_dir.to_str().unwrap_or("").to_string(),
     ]))
 }
@@ -337,7 +373,7 @@ mod tests {
         let elf = elf_path_for(&sketch_dir, "arduino:avr:uno");
         assert_eq!(
             elf,
-            PathBuf::from("/tmp/myblink/build/arduino.avr.uno/myblink.elf")
+            PathBuf::from("/tmp/myblink/build/arduino.avr.uno/myblink.ino.elf")
         );
     }
 
@@ -347,7 +383,7 @@ mod tests {
         let elf = elf_path_for(&sketch_dir, "esp32:esp32:esp32");
         assert_eq!(
             elf,
-            PathBuf::from("/tmp/mysketch/build/esp32.esp32.esp32/mysketch.elf")
+            PathBuf::from("/tmp/mysketch/build/esp32.esp32.esp32/mysketch.ino.elf")
         );
     }
 
@@ -376,6 +412,7 @@ void loop() { digitalWrite(LED_BUILTIN, HIGH); delay(1000); digitalWrite(LED_BUI
     }
 }
 
+#[allow(dead_code)]
 pub fn esptool_flash(port: &str, bin_path: &Path, baud: u32, address: &str) -> String {
     let (exe, mut cmd) = if let Some(e) = find_esptool() {
         (e.to_str().unwrap_or("esptool").to_string(), vec![])

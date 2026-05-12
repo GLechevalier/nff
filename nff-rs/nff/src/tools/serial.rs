@@ -16,6 +16,7 @@ pub enum SerialError {
         source: serialport::Error,
     },
     #[error("Read error on {port}: {source}")]
+    #[allow(dead_code)]
     Read {
         port: String,
         source: serialport::Error,
@@ -209,10 +210,7 @@ pub fn stream_lines(
                 return None;
             }
         }
-        match line {
-            Ok(l) => Some(l),
-            Err(_) => None,
-        }
+        line.ok()
     });
 
     Ok(iter)
