@@ -1,4 +1,4 @@
-# nff — CI/CD for hardware
+# nff — Code Software-Defined Machines easily
 
 nff is an MCP server that gives LLMs direct control over physical hardware. Describe what your machine should do — the LLM writes the firmware, compiles it, flashes it, and reads back serial output, all in one loop. No manual steps. No context switching.
 
