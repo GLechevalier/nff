@@ -304,6 +304,80 @@ impl NffServer {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn flash_params_full() {
+        let p: FlashParams = serde_json::from_str(
+            r#"{"code":"void setup(){}","board":"arduino:avr:uno","port":"COM3"}"#,
+        )
+        .unwrap();
+        assert_eq!(p.code, "void setup(){}");
+        assert_eq!(p.board, Some("arduino:avr:uno".into()));
+        assert_eq!(p.port, Some("COM3".into()));
+    }
+
+    #[test]
+    fn flash_params_optional_fields_absent() {
+        let p: FlashParams = serde_json::from_str(r#"{"code":"void setup(){}"}"#).unwrap();
+        assert!(p.board.is_none());
+        assert!(p.port.is_none());
+    }
+
+    #[test]
+    fn serial_read_defaults() {
+        let p: SerialReadParams = serde_json::from_str(r#"{}"#).unwrap();
+        assert_eq!(p.duration_ms, 3000);
+        assert!(p.port.is_none());
+        assert!(p.baud.is_none());
+    }
+
+    #[test]
+    fn serial_read_explicit() {
+        let p: SerialReadParams =
+            serde_json::from_str(r#"{"duration_ms":5000,"port":"COM1","baud":115200}"#).unwrap();
+        assert_eq!(p.duration_ms, 5000);
+        assert_eq!(p.port, Some("COM1".into()));
+        assert_eq!(p.baud, Some(115200));
+    }
+
+    #[test]
+    fn wokwi_flash_defaults() {
+        let p: WokwiFlashParams = serde_json::from_str(r#"{"code":"sketch"}"#).unwrap();
+        assert_eq!(p.timeout_ms, 5000);
+        assert!(p.board.is_none());
+    }
+
+    #[test]
+    fn wokwi_serial_read_defaults() {
+        let p: WokwiSerialReadParams = serde_json::from_str(r#"{"code":"sketch"}"#).unwrap();
+        assert_eq!(p.duration_ms, 3000);
+        assert!(p.board.is_none());
+    }
+
+    #[test]
+    fn board_param_required() {
+        assert!(serde_json::from_str::<BoardParam>(r#"{}"#).is_err());
+        let p: BoardParam =
+            serde_json::from_str(r#"{"board":"arduino:avr:uno"}"#).unwrap();
+        assert_eq!(p.board, "arduino:avr:uno");
+    }
+
+    #[test]
+    fn resolve_fqbn_explicit() {
+        let result = resolve_fqbn(Some("arduino:avr:uno".into()));
+        assert_eq!(result.unwrap(), "arduino:avr:uno");
+    }
+
+    #[test]
+    fn resolve_fqbn_empty_string_is_error() {
+        let result = resolve_fqbn(Some("".into()));
+        assert!(result.is_err(), "empty string should be treated as missing");
+    }
+}
+
 pub async fn run() -> anyhow::Result<()> {
     let service = NffServer.serve(stdio()).await?;
     service.waiting().await?;

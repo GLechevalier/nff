@@ -301,6 +301,81 @@ pub fn flash(code: &str, fqbn: &str, port: &str) -> String {
     sections.join("\n")
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn write_sketch_creates_ino_file() {
+        let dir = std::env::temp_dir()
+            .join(format!("nff_tc_test_{}", std::process::id()));
+        let sketch_dir = write_sketch("void setup(){} void loop(){}", Some(&dir)).unwrap();
+        assert_eq!(sketch_dir, dir);
+        let ino_name = format!("{}.ino", dir.file_name().unwrap().to_string_lossy());
+        let ino = dir.join(&ino_name);
+        assert!(ino.exists(), ".ino file not created at {}", ino.display());
+        let content = std::fs::read_to_string(&ino).unwrap();
+        assert!(content.contains("void setup()"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn write_sketch_overwrites_existing_file() {
+        let dir = std::env::temp_dir()
+            .join(format!("nff_tc_overwrite_{}", std::process::id()));
+        write_sketch("void setup(){} void loop(){}", Some(&dir)).unwrap();
+        write_sketch("// second write", Some(&dir)).unwrap();
+        let ino = dir.join(format!("{}.ino", dir.file_name().unwrap().to_string_lossy()));
+        let content = std::fs::read_to_string(&ino).unwrap();
+        assert!(content.contains("second write"), "second write should overwrite first");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn elf_path_for_uno() {
+        let sketch_dir = PathBuf::from("/tmp/myblink");
+        let elf = elf_path_for(&sketch_dir, "arduino:avr:uno");
+        assert_eq!(
+            elf,
+            PathBuf::from("/tmp/myblink/build/arduino.avr.uno/myblink.elf")
+        );
+    }
+
+    #[test]
+    fn elf_path_for_esp32() {
+        let sketch_dir = PathBuf::from("/tmp/mysketch");
+        let elf = elf_path_for(&sketch_dir, "esp32:esp32:esp32");
+        assert_eq!(
+            elf,
+            PathBuf::from("/tmp/mysketch/build/esp32.esp32.esp32/mysketch.elf")
+        );
+    }
+
+    #[test]
+    fn find_arduino_cli_does_not_panic() {
+        let _ = find_arduino_cli();
+    }
+
+    #[test]
+    fn find_wokwi_cli_does_not_panic() {
+        let _ = find_wokwi_cli();
+    }
+
+    #[test]
+    #[ignore = "requires arduino-cli on PATH"]
+    fn compile_sketch_blink() {
+        let dir = std::env::temp_dir().join("nff_compile_blink");
+        let code = r#"
+void setup() { pinMode(LED_BUILTIN, OUTPUT); }
+void loop() { digitalWrite(LED_BUILTIN, HIGH); delay(1000); digitalWrite(LED_BUILTIN, LOW); delay(1000); }
+"#;
+        let sketch_dir = write_sketch(code, Some(&dir)).unwrap();
+        let result = compile_sketch(&sketch_dir, "arduino:avr:uno").unwrap();
+        assert!(result.success, "compile failed:\n{}", result.output());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+}
+
 pub fn esptool_flash(port: &str, bin_path: &Path, baud: u32, address: &str) -> String {
     let (exe, mut cmd) = if let Some(e) = find_esptool() {
         (e.to_str().unwrap_or("esptool").to_string(), vec![])

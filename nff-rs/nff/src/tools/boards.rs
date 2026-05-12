@@ -53,3 +53,76 @@ pub fn find_device(port: Option<&str>) -> Option<DetectedDevice> {
         .into_iter()
         .find(|d| port.is_none() || Some(d.port.as_str()) == port)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn board_map_contains_arduino_uno() {
+        assert!(
+            BOARD_MAP.iter().any(|&(vid, pid, _, fqbn, _)| {
+                vid == 0x2341 && pid == 0x0043 && fqbn == "arduino:avr:uno"
+            }),
+            "Arduino Uno (2341:0043) missing from BOARD_MAP"
+        );
+    }
+
+    #[test]
+    fn board_map_contains_esp32_cp210x() {
+        assert!(
+            BOARD_MAP.iter().any(|&(vid, pid, _, fqbn, _)| {
+                vid == 0x10c4 && pid == 0xea60 && fqbn == "esp32:esp32:esp32"
+            }),
+            "ESP32 CP210x (10c4:ea60) missing from BOARD_MAP"
+        );
+    }
+
+    #[test]
+    fn board_map_all_entries_have_wokwi_chip() {
+        for &(vid, pid, name, _, wokwi) in BOARD_MAP {
+            assert!(
+                wokwi.is_some(),
+                "BOARD_MAP entry {name} ({vid:04x}:{pid:04x}) has no wokwi chip"
+            );
+        }
+    }
+
+    #[test]
+    fn board_map_vendor_product_ids_nonzero() {
+        for &(vid, pid, name, _, _) in BOARD_MAP {
+            assert!(vid > 0, "vid == 0 for {name}");
+            assert!(pid > 0, "pid == 0 for {name}");
+        }
+    }
+
+    #[test]
+    fn board_map_fqbns_have_two_colons() {
+        for &(_, _, name, fqbn, _) in BOARD_MAP {
+            assert_eq!(
+                fqbn.chars().filter(|&c| c == ':').count(),
+                2,
+                "FQBN '{fqbn}' for {name} should have exactly 2 colons"
+            );
+        }
+    }
+
+    #[test]
+    fn list_devices_does_not_panic() {
+        let devices = list_devices();
+        // No assert on count — hardware may or may not be present.
+        for d in &devices {
+            assert!(!d.port.is_empty(), "device port should not be empty");
+            assert!(!d.fqbn.is_empty(), "device fqbn should not be empty");
+            assert_eq!(d.vendor_id.len(), 4, "vendor_id should be 4 hex chars");
+            assert_eq!(d.product_id.len(), 4, "product_id should be 4 hex chars");
+        }
+    }
+
+    #[test]
+    fn find_device_with_explicit_port_returns_none_when_not_connected() {
+        // A port that almost certainly doesn't exist.
+        let result = find_device(Some("COM_FAKE_999"));
+        assert!(result.is_none());
+    }
+}

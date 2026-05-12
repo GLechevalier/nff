@@ -1,6 +1,122 @@
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    fn tmp_dir(suffix: &str) -> PathBuf {
+        let p = std::env::temp_dir().join(format!("nff_wokwi_test_{suffix}_{}", std::process::id()));
+        fs::create_dir_all(&p).unwrap();
+        p
+    }
+
+    // --- generate_diagram ---
+
+    #[test]
+    fn all_supported_boards_generate_diagrams() {
+        let cases = [
+            ("arduino:avr:uno",         "wokwi-arduino-uno",       "uno1"),
+            ("arduino:avr:mega",        "wokwi-arduino-mega",      "mega1"),
+            ("arduino:avr:nano",        "wokwi-arduino-nano",      "nano1"),
+            ("arduino:avr:leonardo",    "wokwi-arduino-leonardo",  "leonardo1"),
+            ("esp32:esp32:esp32",       "wokwi-esp32-devkit-v1",   "esp321"),
+            ("esp8266:esp8266:generic", "wokwi-esp8266",           "generic1"),
+        ];
+        for (fqbn, chip, part_id) in cases {
+            let d = generate_diagram(fqbn)
+                .unwrap_or_else(|e| panic!("generate_diagram({fqbn}) failed: {e}"));
+            assert_eq!(d["version"], 1);
+            assert_eq!(d["author"], "nff");
+            assert_eq!(d["parts"][0]["type"], chip,   "wrong chip for {fqbn}");
+            assert_eq!(d["parts"][0]["id"],   part_id, "wrong part_id for {fqbn}");
+            assert_eq!(d["parts"][0]["top"],  0);
+            assert_eq!(d["parts"][0]["left"], 0);
+            assert!(d["connections"].as_array().unwrap().is_empty());
+        }
+    }
+
+    #[test]
+    fn unsupported_board_returns_error() {
+        let err = generate_diagram("bad:board:fqbn").unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("Unsupported"), "error should mention 'Unsupported': {msg}");
+        assert!(msg.contains("bad:board:fqbn"), "error should name the bad FQBN: {msg}");
+    }
+
+    #[test]
+    fn fqbn_to_chip_covers_all_boards_in_board_map() {
+        // Every FQBN that appears in boards::BOARD_MAP with a wokwi_chip should
+        // also be resolvable via generate_diagram.
+        use crate::tools::boards::BOARD_MAP;
+        for &(_, _, _, fqbn, wokwi_chip) in BOARD_MAP {
+            if let Some(chip) = wokwi_chip {
+                let result = generate_diagram(fqbn);
+                assert!(
+                    result.is_ok(),
+                    "BOARD_MAP has wokwi chip '{chip}' for {fqbn} but generate_diagram failed"
+                );
+                assert_eq!(result.unwrap()["parts"][0]["type"], chip);
+            }
+        }
+    }
+
+    // --- write_wokwi_toml ---
+
+    #[test]
+    fn write_wokwi_toml_creates_file() {
+        let dir = tmp_dir("toml");
+        let elf = PathBuf::from("/tmp/sketch/build/arduino.avr.uno/sketch.elf");
+        let toml_path = write_wokwi_toml(&dir, &elf).unwrap();
+        assert!(toml_path.exists());
+        assert_eq!(toml_path.file_name().unwrap(), "wokwi.toml");
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn write_wokwi_toml_content_is_valid() {
+        let dir = tmp_dir("toml_content");
+        let elf = PathBuf::from("/tmp/build/sketch.elf");
+        write_wokwi_toml(&dir, &elf).unwrap();
+        let content = fs::read_to_string(dir.join("wokwi.toml")).unwrap();
+        assert!(content.contains("[wokwi]"),     "missing [wokwi] header");
+        assert!(content.contains("version = 1"), "missing version");
+        assert!(content.contains("/tmp/build/sketch.elf"), "missing elf path");
+        assert!(content.contains("firmware = \"\""), "missing firmware key");
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn write_wokwi_toml_backslashes_converted() {
+        let dir = tmp_dir("toml_bs");
+        let elf = PathBuf::from(r"C:\Users\user\sketch\build\arduino.avr.uno\sketch.elf");
+        write_wokwi_toml(&dir, &elf).unwrap();
+        let content = fs::read_to_string(dir.join("wokwi.toml")).unwrap();
+        assert!(!content.contains('\\'), "backslashes should be converted to forward slashes");
+        assert!(content.contains("C:/Users/user"), "forward-slash path expected");
+        fs::remove_dir_all(dir).ok();
+    }
+
+    // --- resolve_token ---
+
+    #[test]
+    fn resolve_token_reads_env_var() {
+        std::env::set_var("WOKWI_CLI_TOKEN", "tok_test_abc");
+        let token = resolve_token();
+        std::env::remove_var("WOKWI_CLI_TOKEN");
+        assert_eq!(token, Some("tok_test_abc".to_string()));
+    }
+
+    #[test]
+    fn resolve_token_empty_env_is_skipped() {
+        std::env::set_var("WOKWI_CLI_TOKEN", "");
+        let token = resolve_token();
+        std::env::remove_var("WOKWI_CLI_TOKEN");
+        assert_ne!(token, Some("".to_string()), "empty env var should not be returned");
+    }
+}
+
 use crate::tools::{config, toolchain};
 
 #[derive(Error, Debug)]

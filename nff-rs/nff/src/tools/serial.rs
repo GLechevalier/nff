@@ -127,6 +127,70 @@ pub fn reset_device(port: Option<&str>) -> String {
     format!("OK: reset {port_str} via DTR toggle")
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolve_port_explicit_value() {
+        assert_eq!(resolve_port(Some("COM3")).unwrap(), "COM3");
+        assert_eq!(resolve_port(Some("/dev/ttyUSB0")).unwrap(), "/dev/ttyUSB0");
+    }
+
+    #[test]
+    fn resolve_port_none_falls_back_to_config_or_errors() {
+        // Either returns a port string (if config has one) or a NoPort/ConfigUnreadable error.
+        // Both are acceptable — we just confirm it doesn't panic.
+        let _ = resolve_port(None);
+    }
+
+    #[test]
+    fn resolve_baud_explicit_values() {
+        assert_eq!(resolve_baud(Some(9600)).unwrap(),   9600);
+        assert_eq!(resolve_baud(Some(115200)).unwrap(), 115200);
+        assert_eq!(resolve_baud(Some(57600)).unwrap(),  57600);
+    }
+
+    #[test]
+    fn resolve_baud_none_returns_reasonable_default() {
+        let baud = resolve_baud(None).unwrap();
+        assert!(
+            [300, 600, 1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200, 230400, 921600]
+                .contains(&baud),
+            "unexpected default baud rate: {baud}"
+        );
+    }
+
+    #[test]
+    fn serial_read_without_port_returns_error_string() {
+        // No port in config in a fresh test environment → should return "ERROR: ..."
+        // We pass an explicit bad port to avoid config look-up.
+        let result = serial_read(100, Some("COM_NONEXISTENT_999"), Some(9600));
+        assert!(
+            result.starts_with("ERROR:"),
+            "expected ERROR: prefix, got: {result}"
+        );
+    }
+
+    #[test]
+    fn serial_write_without_port_returns_error_string() {
+        let result = serial_write("hello", Some("COM_NONEXISTENT_999"), Some(9600));
+        assert!(
+            result.starts_with("ERROR:"),
+            "expected ERROR: prefix, got: {result}"
+        );
+    }
+
+    #[test]
+    fn reset_device_without_port_returns_error_string() {
+        let result = reset_device(Some("COM_NONEXISTENT_999"));
+        assert!(
+            result.starts_with("ERROR:"),
+            "expected ERROR: prefix, got: {result}"
+        );
+    }
+}
+
 pub fn stream_lines(
     port: Option<&str>,
     baud: Option<u32>,
