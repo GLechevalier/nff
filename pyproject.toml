@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools>=68"]
-build-backend = "setuptools.build_meta"
+requires = ["maturin>=1,<2"]
+build-backend = "maturin"
 
 [project]
 name = "nff"
@@ -35,28 +35,24 @@ Homepage = "https://github.com/GLechevalier/nff"
 Repository = "https://github.com/GLechevalier/nff"
 "Bug Tracker" = "https://github.com/GLechevalier/nff/issues"
 
-[project.scripts]
-nff = "nff.cli:main"
-
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0",
     "pytest-asyncio>=0.23",
     "black",
     "ruff",
+    "maturin>=1,<2",
 ]
+
+[tool.maturin]
+bindings      = "bin"
+manifest-path = "nff-rs/nff/Cargo.toml"
+python-source = "."
+include       = [{ path = "nff/skills/*.md", format = "wheel" }]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
-
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["nff*"]
-exclude = ["tests*", "scripts*"]
-
-[tool.setuptools.package-data]
-"nff" = ["skills/*.md"]
 
 [tool.black]
 line-length = 100

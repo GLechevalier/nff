@@ -130,18 +130,21 @@ no `error:` lines in output).
 
 #### Step 4 — Sync `wokwi.toml`
 
-Open `sketches/<name>/wokwi.toml` and confirm the `firmware` path matches the ELF above:
+Open `sketches/<name>/wokwi.toml` and confirm **both** `elf` and `firmware` are present and correct:
 
 ```toml
 [wokwi]
 version = 1
-firmware = "build/<fqbn_dotted>/<name>.elf/<name>.ino.elf"
-diagram = "diagram.json"
+elf      = "build/<fqbn_dotted>/<name>.ino.elf"
+firmware = "build/<fqbn_dotted>/<name>.ino.merged.bin"
 ```
 
-> The path is **relative** to the folder containing `wokwi.toml` (i.e. `sketches/<name>/`).
-> If `nff wokwi init` generated a different path, fix it now — a wrong firmware path causes
-> a silent "no firmware" failure in the simulator with no helpful error message.
+Both fields are **required** — `elf` drives the simulator; `firmware` is the merged binary for
+flashing real hardware. `nff wokwi init` generates both automatically.
+
+> Paths are **relative** to the folder containing `wokwi.toml` (i.e. `sketches/<name>/`).
+> If either field is missing or wrong, fix it now — a wrong path causes a silent "no firmware"
+> failure in the simulator with no helpful error message.
 
 #### Step 5 — Run visual simulation
 
@@ -292,7 +295,7 @@ all serial debugging.
 | Symptom | Cause | Fix |
 |---|---|---|
 | Compilation error | Sketch bug | Fix `.ino`, re-run `nff flash --sim` |
-| Simulator opens but nothing happens | Wrong ELF path in `wokwi.toml` | Check `firmware =` path — must match actual ELF location |
+| Simulator opens but nothing happens | Wrong path in `wokwi.toml` | Check both `elf =` and `firmware =` — must match actual build output |
 | Simulator opens but nothing happens | `diagram.json` not in same folder as `wokwi.toml` | Move or symlink `diagram.json` to `sketches/<name>/` |
 | LED never lights | Wiring reversed (resistor after LED, not before) | Check chain: GPIO → R → LED_A … LED_C → GND |
 | LED never lights | Cathode pin named `K` | Change to `C` in `diagram.json` |
