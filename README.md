@@ -1,28 +1,42 @@
-# nff — Your bench hardware as a CI target
+# nff — CI/CD for hardware
 
-Firmware iteration is slow because the hardware loop is manual. nff connects your existing bench hardware to Claude Code — push code, it compiles, flashes, and returns serial output automatically. No new hardware. No cloud boards. Your device, automated.
+nff is an MCP server that gives LLMs direct control over physical hardware. Describe what your machine should do — the LLM writes the firmware, compiles it, flashes it, and reads back serial output, all in one loop. No manual steps. No context switching.
 
 ```
 you: "Run the sensor init sequence and assert the calibration values over serial"
-Claude: [writes test] → [compiles] → [flashes ESP32] → [reads serial] → returns structured output
+LLM: [writes firmware] → [compiles] → [flashes ESP32] → [reads serial] → returns structured output
 ```
+
+The vision is **software-defined machines**: hardware whose behaviour is specified in natural language and continuously refined by an LLM. nff is the bridge that makes that possible today, starting with Claude Code. Support for additional LLMs — including our own — is on the roadmap.
 
 **Supported boards:** ESP32 (CP210x / CH340) · ESP8266 (FTDI) · Arduino AVR (Uno, Mega, Nano, Leonardo)  
 STM32 and RP2040 support in progress — open a PR, adding a board is [two lines of code](CONTRIBUTING.md#adding-a-new-board).
+
+**Built in Rust.** Single compiled binary, no Python runtime required at runtime. Installed via `pip install nff` using [maturin](https://github.com/PyO3/maturin), which compiles and packages the binary automatically.
+
+---
+
+## What is a software-defined machine?
+
+Traditional embedded development has a hard boundary: a human writes firmware, compiles it, and flashes it. The machine does exactly what the firmware says, nothing more.
+
+nff removes that boundary. By exposing hardware through the MCP protocol, any LLM can treat your physical device as a programmable target — writing firmware, iterating on it in response to serial output, and closing the loop autonomously. The machine's behaviour becomes a conversation, not a build artifact.
+
+Today that LLM is Claude. The MCP interface is model-agnostic by design — nff will support any MCP-compatible model, including the one we are building.
 
 ---
 
 ## Why this exists
 
-Every firmware iteration means manually compiling, flashing, and reading serial by hand. On a real bench. One cycle takes minutes. Multiply that by a day of debugging and you've lost hours to logistics. nff closes that loop — your board becomes a CI target.
+Hardware development is bottlenecked by the manual flash-debug cycle. One iteration — edit, compile, flash, read serial — takes minutes. A day of debugging burns hours on logistics rather than thinking.
 
-It doesn't replace your toolchain — it automates the logistics around it. arduino-cli handles compilation, esptool handles flashing, your board stays on your bench. nff just closes the loop.
+nff closes that loop. It doesn't replace your toolchain: arduino-cli handles compilation, esptool handles flashing, your board stays on your bench. nff exposes the whole pipeline to an LLM via MCP so the iteration loop runs automatically.
 
 ---
 
-## MCP Tools (what Claude can call)
+## MCP Tools
 
-Once registered, Claude Code has access to these tools:
+Once registered, the connected LLM has access to these tools:
 
 | Tool | What it does |
 |---|---|
@@ -41,6 +55,7 @@ Simulation via Wokwi also supported — useful for CI without a bench. See [Wokw
 
 ## Demo
 
+[![nff Demo](https://img.youtube.com/vi/xKaqBuO8Gjg/maxresdefault.jpg)](https://youtu.be/xKaqBuO8Gjg)
 
 ### Real Hardware
 
@@ -54,13 +69,15 @@ Simulation via Wokwi also supported — useful for CI without a bench. See [Wokw
 
 ## Quickstart
 
-If you've ever lost a morning to manual flash-debug cycles, nff is for you. It doesn't add steps to your workflow — it removes them.
+Get your hardware on the LLM loop in under five minutes.
 
 ### 1. Install
 
 ```bash
 pip install nff
 ```
+
+The package uses [maturin](https://github.com/PyO3/maturin) — `pip install` compiles the Rust binary and places it on your PATH automatically. No separate Rust toolchain needed as a user.
 
 `esptool` is bundled — no separate install needed.
 
@@ -228,31 +245,36 @@ The skill files are also available in the repository at `.claude/commands/` for 
 
 ```
 nff/
-├── nff/
-│   ├── cli.py              # Click entry point — routes subcommands
-│   ├── mcp_server.py       # MCP server — registers all tools for Claude
-│   ├── config.py           # Read/write ~/.nff/config.json
-│   ├── commands/
-│   │   ├── init.py         # nff init
-│   │   ├── flash.py        # nff flash [--sim]
-│   │   ├── monitor.py      # nff monitor
-│   │   ├── doctor.py       # nff doctor
-│   │   └── wokwi.py        # nff wokwi init / run [--gui]
-│   └── tools/
-│       ├── boards.py       # USB vendor ID detection
-│       ├── serial.py       # pyserial read/write/stream
-│       ├── toolchain.py    # arduino-cli subprocess wrappers
-│       └── wokwi.py        # WokwiRunner, generate_diagram, write_wokwi_toml
+├── nff-rs/                     # Rust binary (primary)
+│   └── nff/
+│       └── src/
+│           ├── main.rs         # Entry point — routes all subcommands
+│           ├── cli.rs          # Clap CLI definitions
+│           ├── mcp_server.rs   # MCP server — all tools for Claude (native Rust, rmcp)
+│           ├── commands/
+│           │   ├── init.rs     # nff init
+│           │   ├── flash.rs    # nff flash [--sim]
+│           │   ├── monitor.rs  # nff monitor
+│           │   ├── doctor.rs   # nff doctor
+│           │   ├── mcp.rs      # nff mcp (starts mcp_server::run)
+│           │   └── wokwi.rs    # nff wokwi init / run [--gui]
+│           └── tools/
+│               ├── config.rs   # Read/write ~/.nff/config.json
+│               ├── boards.rs   # USB vendor ID detection
+│               ├── serial.rs   # serialport read/write/stream
+│               ├── toolchain.rs # arduino-cli subprocess wrappers
+│               ├── installer.rs # arduino-cli auto-install
+│               └── wokwi.rs    # WokwiRunner, generate_diagram, write_wokwi_toml
+├── nff/                        # Python package (legacy — test command only)
+│   └── ...
 ├── sketches/
-│   ├── blink_esp32/        # LED blink example
-│   └── servo_button/       # Servo + button example (LEDC, no library)
-├── diagram.json            # Wokwi circuit schematic
-├── wokwi.toml              # Wokwi project config (points to compiled ELF)
+│   ├── blink_esp32/            # LED blink example
+│   └── servo_button/           # Servo + button example (LEDC, no library)
+├── diagram.json                # Wokwi circuit schematic
+├── wokwi.toml                  # Wokwi project config (points to compiled ELF)
 ├── .claude/
 │   └── commands/
-│       └── nff.md          # /nff Claude Code skill
-├── tests/
-├── pyproject.toml
+│       └── nff.md              # /nff Claude Code skill
 └── CONTRIBUTING.md
 ```
 

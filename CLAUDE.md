@@ -83,16 +83,20 @@ Always set minAngle: "-90" and maxAngle: "90" on wokwi-servo in diagram.json.
 
 ---
 
-# nff — Rust Migration Guide
+# nff — Rust Architecture
 
-## Context
+## Status
 
-Goal: replace the Python `nff` binary with a compiled Rust binary — single executable,
+The Python `nff` binary has been fully replaced by a compiled Rust binary — single executable,
 no Python runtime required for end users, stronger types, better cross-platform packaging.
 
-The MCP server (`nff/nff/mcp_server.py`, FastMCP) stays in Python. The Rust binary's
-`nff mcp` command delegates to it via subprocess. Wokwi integration also stays in Python
-(`tools/wokwi.py`, `commands/wokwi.py`) because wokwi-cli is an external binary anyway.
+The MCP server is now native Rust (`nff-rs/nff/src/mcp_server.rs`, rmcp crate). Wokwi
+integration is also native Rust (`tools/wokwi.rs`). Only `nff test` still delegates to the
+Python package via subprocess.
+
+**Adding a new MCP tool:** add it to `nff-rs/nff/src/mcp_server.rs` — implement a method on
+`NffServer` with the `#[tool(...)]` attribute. Do not edit `nff/nff/mcp_server.py`; it is
+superseded.
 
 ## Migration Scope
 
@@ -104,12 +108,10 @@ The MCP server (`nff/nff/mcp_server.py`, FastMCP) stays in Python. The Rust bina
 - `nff/nff/tools/toolchain.py` → `tools/toolchain.rs`
 - `nff/nff/tools/installer.py` → `tools/installer.rs`
 - All commands: `flash`, `init`, `monitor`, `doctor`, `clean`, `connect`, `ota`, `install-deps`
-- `commands/mcp.rs` (thin shim that exec-spawns Python)
+- `commands/mcp.rs` (calls `mcp_server::run()` — native Rust MCP server, no Python)
 
 **OUT (keep in Python):**
-- `nff/nff/mcp_server.py`
-- `nff/nff/tools/wokwi.py`
-- `nff/nff/commands/wokwi.py`
+- `nff test` command only — delegates to `python -m nff test` via subprocess
 
 ## Rust Project Layout
 
@@ -494,21 +496,19 @@ pub fn verify(exe: &Path) -> bool {
 }
 ```
 
-### commands/mcp.rs
+### mcp_server.rs
 
-`nff mcp` must start the Python FastMCP server on stdio (MCP protocol). Python must be installed.
+`nff mcp` starts the MCP server natively in Rust via the `rmcp` crate on stdio. No Python needed.
 
 ```rust
-pub fn run() -> anyhow::Result<()> {
-    let python = which::which("python")
-        .or_else(|_| which::which("python3"))
-        .context("Python not found — install Python 3.10+ to use `nff mcp`")?;
-    let status = std::process::Command::new(python)
-        .args(["-m", "nff", "mcp"])
-        .status()?;
-    std::process::exit(status.code().unwrap_or(1));
+pub async fn run() -> anyhow::Result<()> {
+    let service = NffServer.serve(stdio()).await?;
+    service.waiting().await?;
+    Ok(())
 }
 ```
+
+Add new tools as `async fn` methods on `NffServer` with `#[tool(description = "...")]`.
 
 ### commands/flash.rs (from commands/flash.py)
 
@@ -574,32 +574,32 @@ MCP-facing tool functions (called via Python MCP server through subprocess) must
 `"OK: ..."` or `"ERROR: ..."` strings — same protocol as Python, so the existing
 `mcp_server.py` can call the Rust binary without changes.
 
-## Migration Order
+## Completed Migration Phases
 
-Execute these phases in sequence. Each phase must pass `cargo test && cargo clippy -- -D warnings` before proceeding.
+All phases complete. Run `cargo test && cargo clippy -- -D warnings` to verify.
 
-1. **Bootstrap** — `cargo new --lib nff-rs/nff`, workspace `Cargo.toml`, add all deps, `cargo build` empty project
-2. **config.rs** — no hardware needed; test with `~/.nff/config.json` read/write round-trip
-3. **boards.rs** — pure data + USB enumeration; compare against `python -c "from nff.tools.boards import list_devices; print(list_devices())"`
-4. **serial.rs** — requires connected board or USB loopback adapter for integration tests
-5. **toolchain.rs** — requires arduino-cli installed; unit-test subprocess command construction with `assert_eq!(cmd.get_args(), ...)`
-6. **installer.rs** — test download + extract on Windows (zip) and Linux/macOS (tar.gz); mock HTTP in unit tests
-7. **cli.rs + main.rs skeleton** — clap parses all commands; stubs print `"TODO: <command>"`
-8. **commands one by one** — `init`, `flash`, `monitor`, `doctor`, `clean`, `install_deps`, `mcp`, `connect`, `ota`
-9. **Wokwi delegation** — `wokwi` subcommand group delegates to Python: `Command::new(python).args(["-m", "nff", "wokwi", ...]).status()?`
-10. **Regression** — compare every command output between Python `nff` and Rust `nff` side by side
+1. ~~Bootstrap~~ — workspace Cargo.toml, all deps, builds clean
+2. ~~config.rs~~ — `~/.nff/config.json` read/write round-trip
+3. ~~boards.rs~~ — USB enumeration via `serialport`
+4. ~~serial.rs~~ — read/write/reset via `serialport`
+5. ~~toolchain.rs~~ — arduino-cli subprocess wrappers
+6. ~~installer.rs~~ — download + extract (zip on Windows, tar.gz on Unix)
+7. ~~cli.rs + main.rs~~ — clap, all commands wired
+8. ~~commands~~ — `init`, `flash`, `monitor`, `doctor`, `clean`, `install_deps`, `mcp`, `connect`, `ota`
+9. ~~mcp_server.rs~~ — native Rust MCP server via `rmcp` (no Python subprocess)
+10. ~~tools/wokwi.rs~~ — Wokwi simulation tools in Rust
 
-## Verification Checklist
+## Verification
 
-After each module: `cargo test && cargo clippy -- -D warnings`
+`cargo test && cargo clippy -- -D warnings`
 
-End-to-end after full CLI is complete:
-- [ ] `./nff --version` prints version string matching `pyproject.toml`
+End-to-end smoke test:
+- [ ] `./nff --version` prints version string matching `Cargo.toml`
 - [ ] `./nff init` creates `~/.nff/config.json` with correct schema
-- [ ] `./nff flash <sketch.ino>` compiles and uploads; output matches Python version
+- [ ] `./nff flash <sketch.ino>` compiles and uploads
 - [ ] `./nff monitor --timeout 5` streams serial for 5 s then exits cleanly
 - [ ] `./nff install-deps` downloads and installs arduino-cli
-- [ ] `./nff mcp` starts Python FastMCP server on stdio; `list_devices` tool returns data from Claude Code
+- [ ] `./nff mcp` starts native Rust MCP server on stdio; `list_devices` tool returns data from Claude Code
 - [ ] `cargo build --release` produces a single binary that runs on a clean machine without Python
 
 ## Key Source Files (reference during migration)
@@ -615,4 +615,4 @@ End-to-end after full CLI is complete:
 | `commands/init.rs` | `nff/nff/commands/init.py` |
 | `commands/monitor.rs` | `nff/nff/commands/monitor.py` |
 | `cli.rs` | `nff/nff/cli.py` |
-| `commands/mcp.rs` | `nff/nff/mcp_server.py` (keep Python, just spawn it) |
+| `mcp_server.rs` | Native Rust MCP server (rmcp) — supersedes `nff/nff/mcp_server.py` |

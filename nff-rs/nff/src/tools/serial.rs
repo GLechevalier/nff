@@ -1,5 +1,5 @@
 use crate::tools::config;
-use std::io::{BufRead, BufReader, Write};
+use std::io::Write;
 use std::time::{Duration, Instant};
 use thiserror::Error;
 
@@ -199,19 +199,47 @@ pub fn stream_lines(
 ) -> Result<impl Iterator<Item = String>, SerialError> {
     let port_str = resolve_port(port)?;
     let baud_val = resolve_baud(baud)?;
-
     let sp = open_port(&port_str, baud_val)?;
     let deadline = timeout_s.map(|s| Instant::now() + Duration::from_secs_f64(s));
+    Ok(LineIter { sp, deadline, buf: Vec::new() })
+}
 
-    let reader = BufReader::new(sp);
-    let iter = reader.lines().map_while(move |line| {
-        if let Some(d) = deadline {
-            if Instant::now() >= d {
-                return None;
+struct LineIter {
+    sp: Box<dyn serialport::SerialPort>,
+    deadline: Option<Instant>,
+    buf: Vec<u8>,
+}
+
+impl Iterator for LineIter {
+    type Item = String;
+
+    fn next(&mut self) -> Option<String> {
+        loop {
+            if let Some(d) = self.deadline {
+                if Instant::now() >= d {
+                    return None;
+                }
+            }
+
+            // Yield a line if one is already buffered.
+            if let Some(pos) = self.buf.iter().position(|&b| b == b'\n') {
+                let raw: Vec<u8> = self.buf.drain(..=pos).collect();
+                let line = String::from_utf8_lossy(&raw)
+                    .trim_end_matches(|c| c == '\r' || c == '\n')
+                    .to_string();
+                return Some(line);
+            }
+
+            // Read more bytes; treat timeouts as "no data yet" and retry.
+            let mut chunk = [0u8; 256];
+            match self.sp.read(&mut chunk) {
+                Ok(0) => {}
+                Ok(n) => self.buf.extend_from_slice(&chunk[..n]),
+                Err(ref e)
+                    if e.kind() == std::io::ErrorKind::TimedOut
+                        || e.kind() == std::io::ErrorKind::WouldBlock => {}
+                Err(_) => return None,
             }
         }
-        line.ok()
-    });
-
-    Ok(iter)
+    }
 }
