@@ -21,6 +21,8 @@ jobs:
             nff-rs/target
           key: ${{ runner.os }}-cargo-${{ hashFiles('nff-rs/**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev
       - name: Run Rust tests
         run: cargo test
         working-directory: nff-rs
