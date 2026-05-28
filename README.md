@@ -1,13 +1,16 @@
-# nff — Code Software-Defined Machines easily
+# nff — LLM bridge to hardware
 
-nff is an MCP server that gives LLMs direct control over physical hardware. Describe what your machine should do — the LLM writes the firmware, compiles it, flashes it, and reads back serial output, all in one loop. No manual steps. No context switching.
+nff is an MCP server that gives LLMs direct control over physical hardware — on the bench during development, and in the field for maintenance and diagnosis.
+
+Connect your board over USB and Claude writes, compiles, flashes, and reads serial output autonomously. Deploy devices with nff's agent SDK and Claude can reach them remotely: capture crash state, diagnose failures, and push fixes — without physical access.
 
 ```
 you: "Run the sensor init sequence and assert the calibration values over serial"
 LLM: [writes firmware] → [compiles] → [flashes ESP32] → [reads serial] → returns structured output
-```
 
-The vision is **software-defined machines**: hardware whose behaviour is specified in natural language and continuously refined by an LLM. nff is the bridge that makes that possible today, starting with Claude Code. Support for additional LLMs — including our own — is on the roadmap.
+you: "Why did the unit in the field just hard-fault?"
+LLM: [captures panic over OTA] → [reads registers + backtrace] → "Stack overflow in your sensor ISR at line 47"
+```
 
 **Supported boards:** ESP32 (CP210x / CH340) · ESP8266 (FTDI) · Arduino AVR (Uno, Mega, Nano, Leonardo)  
 STM32 and RP2040 support in progress — open a PR, adding a board is [two lines of code](CONTRIBUTING.md#adding-a-new-board).
@@ -16,38 +19,46 @@ STM32 and RP2040 support in progress — open a PR, adding a board is [two lines
 
 ---
 
-## What is a software-defined machine?
+## Two modes, one tool
 
-Traditional embedded development has a hard boundary: a human writes firmware, compiles it, and flashes it. The machine does exactly what the firmware says, nothing more.
+### Bench development
+nff closes the edit–compile–flash–debug loop. Instead of switching between your editor, terminal, and serial monitor, you stay in one conversation. The LLM iterates on firmware in response to serial output, catches exceptions, and reflashes — handling the logistics so you focus on the problem.
 
-nff removes that boundary. By exposing hardware through the MCP protocol, any LLM can treat your physical device as a programmable target — writing firmware, iterating on it in response to serial output, and closing the loop autonomously. The machine's behaviour becomes a conversation, not a build artifact.
+### Field maintenance
+Once a device is deployed, nff becomes your remote window into it. When a bare-metal MCU crashes in the field there is no shell, no SSH, no process table — just a panic on a chip you cannot physically touch. nff captures the crash state (registers, stack, memory, backtrace) and routes it to a cloud AI agent that explains the failure in plain language and drives the recovery. No truck roll. No JTAG probe on-site.
 
-Today that LLM is Claude. The MCP interface is model-agnostic by design — nff will support any MCP-compatible model, including the one we are building.
+This is the gap Mender, balena, and similar OTA tools cannot fill: they require a living network client running inside the firmware. nff's field mode works precisely when the firmware is dead.
 
 ---
 
-## Why this exists
+## AI crash diagnosis — validated
 
-Hardware development is bottlenecked by the manual flash-debug cycle. One iteration — edit, compile, flash, read serial — takes minutes. A day of debugging burns hours on logistics rather than thinking.
+Phase-0 validation on an ESP32 confirmed that Claude can produce specific, correct diagnoses from raw panic output alone — no ELF file, no source access:
 
-nff closes that loop. It doesn't replace your toolchain: arduino-cli handles compilation, esptool handles flashing, your board stays on your bench. nff exposes the whole pipeline to an LLM via MCP so the iteration loop runs automatically.
+| Crash type | Panic signature | What Claude identifies |
+|---|---|---|
+| Null pointer write | `EXCCAUSE 0x1d` + `EXCVADDR 0x00000000` | StoreProhibited in `setup()`, stack intact |
+| Stack overflow | `EXCCAUSE 0x01` + repeated PC in backtrace | Unbounded recursion, FreeRTOS canary, depth 11 |
+| Watchdog timeout | IDF task-WDT log, no Guru Meditation | `loopTask` on CPU 1 never yielded, liveness failure |
+
+Each failure class produces a different panic format, exception code, backtrace depth, and task snapshot — rich enough signal to distinguish root causes without symbol resolution. With addr2line + the build ELF wired in (next milestone), diagnoses resolve to exact source lines.
 
 ---
 
 ## MCP Tools
 
-Once registered, the connected LLM has access to these tools:
-
 | Tool | What it does |
 |---|---|
 | `list_devices()` | List all connected USB boards |
-| `flash(code, board?, port?)` | Write, compile, and upload a sketch |
+| `flash(path, board?, port?)` | Compile and upload a sketch directory |
 | `serial_read(duration_ms?, port?, baud?)` | Capture serial output for N ms |
 | `serial_write(data, port?, baud?)` | Send a string to the device |
 | `reset_device(port?)` | Toggle DTR to hardware-reset the board |
 | `get_device_info(port?)` | Return port, board name, FQBN, baud rate |
 
 All tools fall back to the default device in `~/.nff/config.json` when `port` and `board` are omitted.
+
+> **`flash` takes a directory path, not raw source code.** Write the `.ino` file to disk first, then pass the sketch directory. Passing raw code triggers a path-resolution bug in the build artifact lookup.
 
 Simulation via Wokwi also supported — useful for CI without a bench. See [Wokwi simulation](#wokwi-simulation) below.
 
@@ -61,10 +72,10 @@ Simulation via Wokwi also supported — useful for CI without a bench. See [Wokw
 
 [![Real Hardware Programming](https://img.youtube.com/vi/JoCwczeRfuQ/maxresdefault.jpg)](https://youtu.be/JoCwczeRfuQ)
 
-
 ### Wokwi Simulation
 
 [![Wokwi Simulation](https://img.youtube.com/vi/FZ70lQ-VP3g/maxresdefault.jpg)](https://youtu.be/FZ70lQ-VP3g)
+
 ---
 
 ## Quickstart
@@ -81,16 +92,16 @@ The package uses [maturin](https://github.com/PyO3/maturin) — `pip install` co
 
 `esptool` is bundled — no separate install needed.
 
-### 2. Install external tools
+### 2. Install board cores
 
 ```bash
-# Board cores (install the ones you need)
+# Install the cores you need
 arduino-cli core install esp32:esp32
 arduino-cli core install arduino:avr
 arduino-cli core install esp8266:esp8266
 ```
 
-> **arduino-cli** is auto-installed by `nff init` if it is not already on your PATH. You can also install it manually from https://arduino.github.io/arduino-cli.
+> **arduino-cli** is auto-installed by `nff init` if it is not already on your PATH.
 
 ### 3. Plug in your board and run init
 
@@ -98,7 +109,7 @@ arduino-cli core install esp8266:esp8266
 nff init
 ```
 
-This single command does everything:
+This single command:
 - Detects your board by USB vendor/product ID
 - Writes `~/.nff/config.json` and a `CLAUDE.md` in the current directory
 - Registers the nff MCP server (`claude mcp add nff nff mcp`)
@@ -113,7 +124,7 @@ This single command does everything:
   ✓ Claude Desktop config updated
 ```
 
-### 4. Verify everything works
+### 4. Verify
 
 ```bash
 nff doctor
@@ -128,29 +139,26 @@ nff doctor
 | Command | Description |
 |---|---|
 | `nff init` | Detect board, write config, register MCP server |
-| `nff flash <file>` | Compile and upload a sketch or sketch directory |
-| `nff monitor` | Stream serial output (Ctrl+C to exit, or `--timeout SECONDS`) |
-| `nff connect` | Attach to a connected device, continuously analyse its logs, and autonomously repair detected issues |
+| `nff flash <path>` | Compile and upload a sketch directory |
+| `nff monitor` | Stream serial output (Ctrl+C to exit) |
+| `nff connect` | Attach to a device, continuously analyse its logs, autonomously repair detected issues |
 | `nff doctor` | Check all dependencies and configuration |
 | `nff mcp` | Start the MCP server (called automatically by Claude Code) |
 
 ```bash
 nff flash sketches/sensor_init
 nff flash sketches/sensor_init --board esp32:esp32:esp32 --port COM3
-nff flash sketches/sensor_init --manual-reset    # for boards with broken auto-reset
+nff flash sketches/sensor_init --manual-reset    # for boards without auto-reset
 nff monitor --port COM10 --baud 115200
-nff monitor --port COM10 --baud 115200 --timeout 15   # stop after 15 seconds
-nff repair
-nff repair --port COM10 --baud 115200
-nff repair --port COM10 --sketch sketches/sensor_init   # re-flash after each fix
+nff monitor --port COM10 --baud 115200 --timeout 15
 ```
 
-### nff repair — Autonomous log analysis and repair
+### nff connect — Autonomous log analysis and repair
 
-`nff repair` keeps a live serial connection to your device and hands each batch of log output to Claude for analysis. When Claude detects an error, a hang, unexpected output, or a recoverable fault, it rewrites the relevant sketch, recompiles, reflashes, and resumes monitoring — closing the debug loop without any manual intervention.
+`nff connect` keeps a live serial connection to your device and routes each batch of output to Claude for analysis. When Claude detects an error, a hang, or a recoverable fault, it rewrites the sketch, recompiles, reflashes, and resumes monitoring — closing the repair loop without manual intervention.
 
 ```
-nff repair
+nff connect
   ↓ streams serial from device
   ↓ Claude analyses each log window
   ↓ fault detected → sketch rewritten → nff flash → device reset
@@ -172,7 +180,7 @@ Useful flags:
 | Command | Description |
 |---|---|
 | `nff wokwi init` | Scaffold `wokwi.toml` + `diagram.json` in current directory |
-| `nff flash --sim <file>` | Compile sketch and run headless Wokwi simulation |
+| `nff flash --sim <path>` | Compile sketch and run headless Wokwi simulation |
 | `nff wokwi run` | Run simulation, stream serial output to terminal |
 | `nff wokwi run --gui` | Open `diagram.json` in VS Code and auto-start visual simulation |
 | `nff wokwi run --serial-log FILE` | Save serial output to file |
@@ -198,7 +206,7 @@ Board not listed? Open a PR — adding one is [two lines of code](CONTRIBUTING.m
 
 ## Config File
 
-`~/.nff/config.json`, written by `nff init` and `nff wokwi init`, editable by hand:
+`~/.nff/config.json`, written by `nff init` and editable by hand:
 
 ```json
 {
@@ -217,27 +225,25 @@ Board not listed? Open a PR — adding one is [two lines of code](CONTRIBUTING.m
 }
 ```
 
-The Wokwi token can also be set via the `WOKWI_CLI_TOKEN` environment variable (takes precedence over config).
+The Wokwi token can also be set via `WOKWI_CLI_TOKEN` (takes precedence over config).
 
 ---
 
 ## Claude Code Skills
 
-nff ships two Claude Code skills that are **automatically installed to `~/.claude/commands/` when you run `nff init`**, making them available globally in every Claude Code session.
+nff ships two Claude Code skills **automatically installed to `~/.claude/commands/` by `nff init`**:
 
 | Skill | When to use |
 |---|---|
-| `/nff` | Full pipeline reference — hardware and simulation workflows, sketch-first rules, servo calibration, debugging checklist |
-| `/wokwi-diagram` | `diagram.json` authoring reference — component types, pin names, wiring patterns for LEDs, buttons, servos, sensors |
-
-Type the skill name in any Claude Code prompt to load the reference into context:
+| `/nff` | Full pipeline reference — hardware and simulation workflows, sketch-first rules, debugging checklist |
+| `/wokwi-diagram` | `diagram.json` authoring reference — component types, pin names, wiring patterns |
 
 ```
 /nff
 /wokwi-diagram
 ```
 
-The skill files are also available in the repository at `.claude/commands/` for project-level use, and are bundled inside the `nff` package at `nff/skills/` so they ship with every `pip install nff`.
+Skill files are in `.claude/commands/` for project-level use and bundled inside `nff/skills/` so they ship with every `pip install nff`.
 
 ---
 
@@ -245,38 +251,48 @@ The skill files are also available in the repository at `.claude/commands/` for 
 
 ```
 nff/
-├── nff-rs/                     # Rust binary (primary)
+├── nff-rs/                      # Rust binary (primary codebase)
+│   ├── Cargo.toml               # Workspace root
+│   ├── Cargo.lock
 │   └── nff/
+│       ├── Cargo.toml           # nff v0.2.x
 │       └── src/
-│           ├── main.rs         # Entry point — routes all subcommands
-│           ├── cli.rs          # Clap CLI definitions
-│           ├── mcp_server.rs   # MCP server — all tools for Claude (native Rust, rmcp)
+│           ├── main.rs          # Entry point — routes all subcommands
+│           ├── cli.rs           # Clap CLI definitions
+│           ├── mcp_server.rs    # Native Rust MCP server (rmcp)
 │           ├── commands/
-│           │   ├── init.rs     # nff init
-│           │   ├── flash.rs    # nff flash [--sim]
-│           │   ├── monitor.rs  # nff monitor
-│           │   ├── doctor.rs   # nff doctor
-│           │   ├── mcp.rs      # nff mcp (starts mcp_server::run)
-│           │   └── wokwi.rs    # nff wokwi init / run [--gui]
+│           │   ├── mod.rs
+│           │   ├── init.rs
+│           │   ├── flash.rs
+│           │   ├── monitor.rs
+│           │   ├── connect.rs
+│           │   ├── ota.rs
+│           │   ├── doctor.rs
+│           │   ├── clean.rs
+│           │   ├── install_deps.rs
+│           │   ├── mcp.rs
+│           │   └── wokwi.rs
 │           └── tools/
-│               ├── config.rs   # Read/write ~/.nff/config.json
-│               ├── boards.rs   # USB vendor ID detection
-│               ├── serial.rs   # serialport read/write/stream
+│               ├── mod.rs
+│               ├── config.rs    # ~/.nff/config.json read/write
+│               ├── boards.rs    # USB vendor ID detection
+│               ├── serial.rs    # serialport read/write/stream
 │               ├── toolchain.rs # arduino-cli subprocess wrappers
 │               ├── installer.rs # arduino-cli auto-install
-│               └── wokwi.rs    # WokwiRunner, generate_diagram, write_wokwi_toml
-├── nff/                        # Python package (legacy — test command only)
-│   └── ...
+│               └── wokwi.rs    # WokwiRunner, diagram generation
+├── nff/                         # Python package (legacy — nff test only)
 ├── sketches/
-│   ├── blink_esp32/            # LED blink example
-│   └── servo_button/           # Servo + button example (LEDC, no library)
-├── diagram.json                # Wokwi circuit schematic
-├── wokwi.toml                  # Wokwi project config (points to compiled ELF)
-├── .claude/
-│   └── commands/
-│       └── nff.md              # /nff Claude Code skill
-└── CONTRIBUTING.md
+│   ├── blink_esp32/
+│   └── servo_button/
+├── diagram.json                 # Wokwi circuit schematic
+├── wokwi.toml
+└── .claude/
+    └── commands/
+        ├── nff.md               # /nff Claude Code skill
+        └── wokwi-diagram.md     # /wokwi-diagram Claude Code skill
 ```
+
+The Python package (`nff/`) is kept solely for `nff test`, which delegates to `python -m nff test`. All other commands run from the Rust binary. Do not edit `nff/nff/mcp_server.py` — it is superseded by `nff-rs/nff/src/mcp_server.rs`.
 
 ---
 
@@ -287,22 +303,22 @@ sudo usermod -aG dialout $USER
 # then log out and back in
 ```
 
-`nff doctor` detects this and prints the fix if your port is inaccessible.
+`nff doctor` detects this and prints the fix.
 
 ---
 
 ## Wokwi Simulation
 
-Simulation is available for CI runs where no bench hardware is present. Get a free CI token at https://wokwi.com/dashboard/ci, then:
+Get a free CI token at https://wokwi.com/dashboard/ci, then:
 
 ```bash
 nff wokwi init --board esp32:esp32:esp32 --token YOUR_TOKEN
 nff flash --sim sketches/my_sketch --board esp32:esp32:esp32
-nff wokwi run              # headless, serial output only
+nff wokwi run              # headless
 nff wokwi run --gui        # visual simulation in VS Code
 ```
 
-Install the [Wokwi VS Code extension](https://marketplace.visualstudio.com/items?itemName=wokwi.wokwi-vscode) for the animated circuit view. `nff wokwi run --gui` opens `diagram.json` as a new tab and automatically triggers **Wokwi: Start Simulator** after 3 seconds.
+Install the [Wokwi VS Code extension](https://marketplace.visualstudio.com/items?itemName=wokwi.wokwi-vscode) for the animated circuit view.
 
 ### Wokwi MCP Tools
 
@@ -314,16 +330,14 @@ Install the [Wokwi VS Code extension](https://marketplace.visualstudio.com/items
 
 ### diagram.json — Circuit Schematic
 
-The circuit lives in `diagram.json` next to `wokwi.toml`. `nff wokwi init` generates a minimal single-MCU stub; add components and wiring by hand or ask Claude.
-
-**Always include the serial monitor wires:**
+Always include the serial monitor wires:
 
 ```json
 ["esp:TX0", "$serialMonitor:RX", "", []],
 ["esp:RX0", "$serialMonitor:TX", "", []]
 ```
 
-**Common components:**
+Common components:
 
 ```json
 { "type": "wokwi-led",        "id": "led1", "attrs": { "color": "red" } }
@@ -332,13 +346,13 @@ The circuit lives in `diagram.json` next to `wokwi.toml`. `nff wokwi init` gener
 { "type": "wokwi-resistor",   "id": "r1",   "attrs": { "value": "220" } }
 ```
 
-**ESP32 DevKit V1 pins:** `esp:D<gpio>` · `esp:GND.1` · `esp:GND.2` · `esp:3V3` · `esp:VIN` · `esp:TX0` · `esp:RX0`
+ESP32 DevKit V1 pins: `esp:D<gpio>` · `esp:GND.1` · `esp:GND.2` · `esp:3V3` · `esp:VIN` · `esp:TX0` · `esp:RX0`
 
-**Pushbutton wiring:** one side to GPIO (`btn1:1.l`), other side to GND (`btn1:2.l`). Use `INPUT_PULLUP` in the sketch.
+Pushbutton wiring: GPIO side → `btn1:1.l`, GND side → `btn1:2.l`. Use `INPUT_PULLUP` in the sketch.
 
 ### ESP32 Servo — No Library Required
 
-Use the built-in LEDC peripheral instead of `ESP32Servo`. Wokwi maps its full servo range to **500 µs – 2500 µs** pulses.
+Use the built-in LEDC peripheral instead of `ESP32Servo`. Wokwi maps its full servo range to 500 µs – 2500 µs pulses.
 
 With 50 Hz / 16-bit resolution (period = 20 000 µs):
 
@@ -349,8 +363,8 @@ With 50 Hz / 16-bit resolution (period = 20 000 µs):
 | +90° (max) | 2500 µs | 8192 |
 
 ```cpp
-ledcAttach(SERVO_PIN, 50, 16);     // ESP32 Arduino core 3.x API
-ledcWrite(SERVO_PIN, 4915);        // move to center
+ledcAttach(SERVO_PIN, 50, 16);
+ledcWrite(SERVO_PIN, 4915);
 ```
 
 Set `"minAngle": "-90", "maxAngle": "90"` in `diagram.json` for correct visual mapping.

@@ -11,13 +11,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
         with:
-          python-version: "3.12"
-      - name: Install Python deps (no Rust build needed for tests)
-        run: pip install pyserial mcp click rich esptool pytest pytest-asyncio
-      - name: Run tests
-        run: pytest tests/
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            nff-rs/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('nff-rs/**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+      - name: Run Rust tests
+        run: cargo test
+        working-directory: nff-rs
 
   # ── 2. Bump version + tag ───────────────────────────────────────────────────
   bump-version:
