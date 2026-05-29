@@ -84,6 +84,16 @@ struct BoardParam {
     board: String,
 }
 
+#[derive(Deserialize, JsonSchema)]
+struct RepairParams {
+    /// Raw serial/crash output to diagnose
+    serial_output: String,
+    /// Firmware build ID (hex hash of ELF). Enables symbol resolution when provided.
+    build_id: Option<String>,
+    /// Board FQBN hint for the diagnosis server
+    board: Option<String>,
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -299,6 +309,72 @@ impl NffServer {
             Ok(r) => r.serial_output,
             Err(e) => format!("ERROR: {e}"),
         }
+    }
+
+    #[tool(description = "Send serial/crash output to the nff diagnosis server and return a structured diagnosis as JSON. Requires prior authentication — run `nff auth login` from the terminal if not yet logged in.")]
+    fn repair(&self, Parameters(p): Parameters<RepairParams>) -> String {
+        let config = match crate::tools::config::load() {
+            Ok(c) => c,
+            Err(e) => return format!("ERROR: {e}"),
+        };
+        let server_url = config.diagnosis.server_url.clone();
+        let Some(access_token) = config.diagnosis.access_token.clone() else {
+            return "ERROR: not authenticated — run `nff auth login`".into();
+        };
+        let refresh_token = config.diagnosis.refresh_token.clone();
+        let serial_output = p.serial_output;
+        let build_id = p.build_id;
+        let board = p.board;
+
+        // reqwest::blocking panics when called from within a Tokio runtime (the MCP
+        // server runs under one via rmcp). Offload all HTTP work to a plain OS thread.
+        std::thread::spawn(move || {
+            let result = crate::commands::repair::call_repair(
+                &server_url,
+                &access_token,
+                &serial_output,
+                build_id.as_deref(),
+                board.as_deref(),
+            );
+            match result {
+                Ok(output) => {
+                    serde_json::to_string(&output).unwrap_or_else(|e| format!("ERROR: {e}"))
+                }
+                Err(e) if e.to_string().contains("401") => {
+                    let Some(refresh) = refresh_token else {
+                        let _ = crate::tools::config::clear_diagnosis_tokens();
+                        return "ERROR: session expired — run `nff auth login`".into();
+                    };
+                    match crate::tools::auth::refresh_tokens(&server_url, &refresh) {
+                        Ok(new_tokens) => {
+                            let _ = crate::tools::config::set_diagnosis_tokens(
+                                &new_tokens.access_token,
+                                &new_tokens.refresh_token,
+                            );
+                            match crate::commands::repair::call_repair(
+                                &server_url,
+                                &new_tokens.access_token,
+                                &serial_output,
+                                build_id.as_deref(),
+                                board.as_deref(),
+                            ) {
+                                Ok(output) => serde_json::to_string(&output)
+                                    .unwrap_or_else(|e| format!("ERROR: {e}")),
+                                Err(e) => format!("ERROR: {e}"),
+                            }
+                        }
+                        Err(_) => {
+                            let _ = crate::tools::config::clear_diagnosis_tokens();
+                            "ERROR: session expired — run `nff auth login` to re-authenticate"
+                                .into()
+                        }
+                    }
+                }
+                Err(e) => format!("ERROR: {e}"),
+            }
+        })
+        .join()
+        .unwrap_or_else(|_| "ERROR: repair thread panicked".into())
     }
 
     #[tool(description = "Return a minimal diagram.json for the given board FQBN as a pretty-printed JSON string")]

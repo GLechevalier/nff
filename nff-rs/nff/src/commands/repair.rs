@@ -14,25 +14,25 @@ struct RepairRequest<'a> {
     board: Option<&'a str>,
 }
 
-#[derive(Deserialize, Debug)]
-struct DiagnosisOutput {
-    crash_class: String,
-    root_cause: String,
-    confidence: f64,
+#[derive(Serialize, Deserialize, Debug)]
+pub struct DiagnosisOutput {
+    pub crash_class: String,
+    pub root_cause: String,
+    pub confidence: f64,
     #[serde(default)]
-    candidates: Vec<Candidate>,
+    pub candidates: Vec<Candidate>,
 }
 
-#[derive(Deserialize, Debug)]
-struct Candidate {
-    crash_class: String,
-    explanation: String,
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Candidate {
+    pub crash_class: String,
+    pub explanation: String,
 }
 
-#[derive(Deserialize, Debug)]
-struct RepairOutput {
-    diagnosis: DiagnosisOutput,
-    build_id_used: String,
+#[derive(Serialize, Deserialize, Debug)]
+pub struct RepairOutput {
+    pub diagnosis: DiagnosisOutput,
+    pub build_id_used: String,
 }
 
 pub fn run(args: &RepairArgs) -> Result<()> {
@@ -122,7 +122,7 @@ pub fn run(args: &RepairArgs) -> Result<()> {
     }
 }
 
-fn call_repair(
+pub fn call_repair(
     server_url: &str,
     token: &str,
     serial_output: &str,

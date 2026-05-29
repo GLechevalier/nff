@@ -1,7 +1,7 @@
 /// Integration tests for the MCP JSON-RPC server.
 /// Spawns `nff mcp`, pipes messages in, captures output.
 /// Run with: cargo test --test mcp
-use std::io::Write;
+use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
@@ -39,6 +39,56 @@ fn mcp_exchange(messages: &[&str]) -> String {
     String::from_utf8_lossy(&out.stdout).into_owned()
 }
 
+/// Send setup messages + one tool call, keep stdin open while reading, wait up to
+/// `timeout_secs` for the JSON-RPC response with the given `id`, then kill the process.
+/// Use this for tools that make network calls and can't rely on a quick stdin-EOF exit.
+fn mcp_call(
+    setup: &[&str],
+    call_msg: &str,
+    id: u64,
+    timeout_secs: u64,
+) -> Option<serde_json::Value> {
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    let mut child = Command::new(nff())
+        .arg("mcp")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("failed to spawn nff mcp");
+
+    let stdout = child.stdout.take().unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+
+    for msg in setup {
+        stdin.write_all(msg.as_bytes()).unwrap();
+        stdin.write_all(b"\n").unwrap();
+    }
+    stdin.write_all(call_msg.as_bytes()).unwrap();
+    stdin.write_all(b"\n").unwrap();
+
+    let (tx, rx) = mpsc::channel::<serde_json::Value>();
+    std::thread::spawn(move || {
+        for line in BufReader::new(stdout).lines() {
+            let line = line.unwrap_or_default();
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
+                if v["id"] == id {
+                    tx.send(v).ok();
+                    return;
+                }
+            }
+        }
+    });
+
+    let result = rx.recv_timeout(Duration::from_secs(timeout_secs)).ok();
+    drop(stdin);
+    child.kill().ok();
+    child.wait().ok();
+    result
+}
+
 const INIT: &str = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"0"}}}"#;
 const INITIALIZED: &str = r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#;
 const LIST_TOOLS: &str = r#"{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}"#;
@@ -74,7 +124,7 @@ fn initialize_response_has_id_1() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn tools_list_returns_all_nine_tools() {
+fn tools_list_returns_all_tools() {
     let output = mcp_exchange(&[INIT, INITIALIZED, LIST_TOOLS]);
 
     let expected = [
@@ -87,6 +137,7 @@ fn tools_list_returns_all_nine_tools() {
         "wokwi_flash",
         "wokwi_serial_read",
         "wokwi_get_diagram",
+        "repair",
     ];
 
     for tool in &expected {
@@ -111,7 +162,7 @@ fn tools_list_response_is_valid_json() {
     let resp = tool_response.unwrap();
     let tools = resp["result"]["tools"].as_array();
     assert!(tools.is_some(), "result.tools should be an array: {resp}");
-    assert_eq!(tools.unwrap().len(), 9, "expected exactly 9 tools: {resp}");
+    assert_eq!(tools.unwrap().len(), 10, "expected exactly 10 tools: {resp}");
 }
 
 // ---------------------------------------------------------------------------
@@ -229,6 +280,35 @@ fn call_serial_read_from_real_device() {
     let call = r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"serial_read","arguments":{"duration_ms":500}}}"#;
     let output = mcp_exchange(&[INIT, INITIALIZED, call]);
     assert!(output.contains("id") && output.contains("result"));
+}
+
+#[test]
+#[ignore = "environment-dependent: passes when no auth token or server is unreachable; use call_repair_with_server_returns_diagnosis when server is running"]
+fn call_repair_no_server_returns_error() {
+    let call = r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"repair","arguments":{"serial_output":"Guru Meditation Error"}}}"#;
+    let resp = mcp_call(&[INIT, INITIALIZED], call, 3, 70)
+        .expect("no response for repair call within timeout");
+
+    let text = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
+    assert!(
+        text.starts_with("ERROR:"),
+        "repair without reachable server should return ERROR: prefix: {text}"
+    );
+}
+
+#[test]
+#[ignore = "requires nff-diagnosis server running at http://127.0.0.1:8080 and a valid session"]
+fn call_repair_with_server_returns_diagnosis() {
+    let call = r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"repair","arguments":{"serial_output":"Guru Meditation Error: Core  0 panic'ed (StoreProhibited). Exception was unhandled."}}}"#;
+    let resp = mcp_call(&[INIT, INITIALIZED], call, 3, 70)
+        .expect("no response for repair call within timeout");
+
+    let text = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
+    let parsed: serde_json::Value = serde_json::from_str(text)
+        .unwrap_or_else(|e| panic!("repair result is not valid JSON: {e}\n{text}"));
+
+    assert!(parsed["diagnosis"].is_object(), "should have a diagnosis object: {parsed}");
+    assert!(parsed["build_id_used"].is_string(), "should have build_id_used: {parsed}");
 }
 
 #[test]
