@@ -1,4 +1,9 @@
-use rmcp::{handler::server::wrapper::Parameters, tool, tool_router, ServiceExt, transport::stdio};
+use rmcp::{
+    ServerHandler,
+    handler::server::wrapper::Parameters,
+    model::{Implementation, ServerCapabilities, ServerInfo},
+    tool, tool_handler, tool_router,
+};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -94,6 +99,14 @@ struct RepairParams {
     board: Option<String>,
 }
 
+#[derive(Deserialize, JsonSchema)]
+struct AuthLoginParams {
+    /// Email for direct login. Omit both email and password to open a browser OAuth flow instead.
+    email: Option<String>,
+    /// Password for direct login. Required when email is provided.
+    password: Option<String>,
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -124,10 +137,37 @@ fn json_sim_error(serial_output: &str, compile_output: &str, exit_code: i32) -> 
 }
 
 // ---------------------------------------------------------------------------
+// HTTP Bearer auth middleware
+// ---------------------------------------------------------------------------
+
+async fn bearer_auth(
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Result<axum::response::Response, axum::http::StatusCode> {
+    use axum::http::StatusCode;
+    let authed = request
+        .headers()
+        .get("Authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .map(|token| {
+            crate::tools::config::load()
+                .map(|c| c.diagnosis.access_token.as_deref() == Some(token))
+                .unwrap_or(false)
+        })
+        .unwrap_or(false);
+    if authed {
+        Ok(next.run(request).await)
+    } else {
+        Err(StatusCode::UNAUTHORIZED)
+    }
+}
+
+// ---------------------------------------------------------------------------
 // MCP server
 // ---------------------------------------------------------------------------
 
-#[tool_router(server_handler)]
+#[tool_router]
 impl NffServer {
     #[tool(description = "List all connected USB/serial devices with board identification")]
     fn list_devices(&self) -> String {
@@ -311,6 +351,85 @@ impl NffServer {
         }
     }
 
+    #[tool(description = "Log in to the nff diagnosis server. Provide email+password for a direct login, or omit both to open a browser OAuth flow instead. Call `auth_status` afterwards to confirm.")]
+    fn auth_login(&self, Parameters(p): Parameters<AuthLoginParams>) -> String {
+        std::thread::spawn(move || {
+            let config = match crate::tools::config::load() {
+                Ok(c) => c,
+                Err(e) => return format!("ERROR: {e}"),
+            };
+            let server_url = config.diagnosis.server_url.clone();
+
+            let tokens = match (p.email, p.password) {
+                (Some(email), Some(password)) => {
+                    crate::tools::auth::direct_login(&server_url, &email, &password)
+                }
+                (None, None) => {
+                    let (listener, port) = match crate::tools::auth::bind_callback_server() {
+                        Ok(v) => v,
+                        Err(e) => return format!("ERROR: {e}"),
+                    };
+                    let callback_url = format!("http://127.0.0.1:{port}/callback");
+                    let portal_url = format!(
+                        "{}/auth/portal?cb={}",
+                        server_url,
+                        crate::tools::auth::percent_encode(&callback_url)
+                    );
+                    if let Err(e) = crate::tools::auth::open_browser(&portal_url) {
+                        return format!("ERROR: could not open browser: {e}. Visit manually: {portal_url}");
+                    }
+                    crate::tools::auth::wait_for_callback(listener, 300)
+                }
+                _ => return "ERROR: provide both email and password, or neither for browser login".into(),
+            };
+
+            match tokens {
+                Ok(t) => match crate::tools::config::set_diagnosis_tokens(&t.access_token, &t.refresh_token) {
+                    Ok(_) => "OK: authenticated".into(),
+                    Err(e) => format!("ERROR: could not save tokens: {e}"),
+                },
+                Err(e) => format!("ERROR: {e}"),
+            }
+        })
+        .join()
+        .unwrap_or_else(|_| "ERROR: auth thread panicked".into())
+    }
+
+    #[tool(description = "Log out from the nff diagnosis server and clear stored tokens.")]
+    fn auth_logout(&self) -> String {
+        std::thread::spawn(move || {
+            let config = match crate::tools::config::load() {
+                Ok(c) => c,
+                Err(e) => return format!("ERROR: {e}"),
+            };
+            if let Some(token) = &config.diagnosis.access_token {
+                let client = reqwest::blocking::Client::new();
+                let _ = client
+                    .post(format!("{}/api/auth/logout", config.diagnosis.server_url))
+                    .header("Authorization", format!("Bearer {token}"))
+                    .timeout(std::time::Duration::from_secs(10))
+                    .send();
+            }
+            match crate::tools::config::clear_diagnosis_tokens() {
+                Ok(_) => "OK: logged out".into(),
+                Err(e) => format!("ERROR: {e}"),
+            }
+        })
+        .join()
+        .unwrap_or_else(|_| "ERROR: logout thread panicked".into())
+    }
+
+    #[tool(description = "Return authentication status for the nff diagnosis server. Call this before `repair` to check whether the user is logged in.")]
+    fn auth_status(&self) -> String {
+        match crate::tools::config::load() {
+            Err(e) => format!("ERROR: {e}"),
+            Ok(c) => match c.diagnosis.access_token {
+                Some(_) => "OK: authenticated".into(),
+                None => "ERROR: not authenticated — run `nff auth login`".into(),
+            },
+        }
+    }
+
     #[tool(description = "Send serial/crash output to the nff diagnosis server and return a structured diagnosis as JSON. Requires prior authentication — run `nff auth login` from the terminal if not yet logged in.")]
     fn repair(&self, Parameters(p): Parameters<RepairParams>) -> String {
         let config = match crate::tools::config::load() {
@@ -460,8 +579,37 @@ mod tests {
     }
 }
 
-pub async fn run() -> anyhow::Result<()> {
-    let service = NffServer.serve(stdio()).await?;
-    service.waiting().await?;
+#[tool_handler]
+impl ServerHandler for NffServer {
+    fn get_info(&self) -> ServerInfo {
+        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+            .with_server_info(Implementation::new("nff", env!("CARGO_PKG_VERSION")))
+            .with_instructions(
+                "nff MCP server — all tools require HTTP Bearer authentication. \
+                Use `nff auth login` to obtain a token, then pass it as \
+                Authorization: Bearer <token> on every request.",
+            )
+    }
+}
+
+pub async fn run(bind: &str) -> anyhow::Result<()> {
+    use axum::{Router, middleware};
+    use rmcp::transport::streamable_http_server::{
+        StreamableHttpService, StreamableHttpServerConfig,
+        session::local::LocalSessionManager,
+    };
+    use std::sync::Arc;
+
+    let service = StreamableHttpService::new(
+        || Ok(NffServer),
+        Arc::<LocalSessionManager>::default(),
+        StreamableHttpServerConfig::default(),
+    );
+    let app = Router::new()
+        .nest_service("/mcp", service)
+        .layer(middleware::from_fn(bearer_auth));
+    let listener = tokio::net::TcpListener::bind(bind).await?;
+    eprintln!("nff MCP server listening on http://{bind}/mcp");
+    axum::serve(listener, app).await?;
     Ok(())
 }

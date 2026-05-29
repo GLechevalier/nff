@@ -19,9 +19,9 @@ fn main() {
         Commands::Connect           => commands::connect::run(),
         Commands::Ota               => commands::ota::run(),
         Commands::InstallDeps(args) => commands::install_deps::run(&args),
-        Commands::Mcp               => tokio::runtime::Runtime::new()
+        Commands::Mcp(args)         => tokio::runtime::Runtime::new()
             .expect("failed to create tokio runtime")
-            .block_on(commands::mcp::run()),
+            .block_on(commands::mcp::run(&args)),
         Commands::Wokwi(w) => match w.sub {
             WokwiSubcommands::Init(a) => commands::wokwi::run_init(&a),
             WokwiSubcommands::Run(a)  => commands::wokwi::run_run(&a),

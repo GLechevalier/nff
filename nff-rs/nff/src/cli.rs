@@ -21,7 +21,7 @@ pub enum Commands {
     Ota,
     #[command(name = "install-deps")]
     InstallDeps(InstallDepsArgs),
-    Mcp,
+    Mcp(McpArgs),
     Auth(AuthCommand),
     Repair(RepairArgs),
 }
@@ -100,6 +100,16 @@ pub struct WokwiRunArgs {
     pub timeout: u32,
     #[arg(long, value_name = "FILE", help = "Write captured serial output to this file.")]
     pub serial_log: Option<PathBuf>,
+}
+
+// ── mcp ─────────────────────────────────────────────────────────────────────
+
+#[derive(Args)]
+pub struct McpArgs {
+    #[arg(long, default_value = "127.0.0.1", value_name = "ADDR", help = "Address to bind the HTTP server to.")]
+    pub host: String,
+    #[arg(long, default_value = "3000", value_name = "PORT", help = "Port to listen on.")]
+    pub port: u16,
 }
 
 // ── auth ────────────────────────────────────────────────────────────────────
