@@ -22,6 +22,8 @@ pub enum Commands {
     #[command(name = "install-deps")]
     InstallDeps(InstallDepsArgs),
     Mcp,
+    Auth(AuthCommand),
+    Repair(RepairArgs),
 }
 
 #[derive(Args)]
@@ -98,4 +100,58 @@ pub struct WokwiRunArgs {
     pub timeout: u32,
     #[arg(long, value_name = "FILE", help = "Write captured serial output to this file.")]
     pub serial_log: Option<PathBuf>,
+}
+
+// ── auth ────────────────────────────────────────────────────────────────────
+
+#[derive(Args)]
+pub struct AuthCommand {
+    #[command(subcommand)]
+    pub sub: AuthSubcommands,
+}
+
+#[derive(Subcommand)]
+pub enum AuthSubcommands {
+    #[command(about = "Sign in to the nff diagnosis service.")]
+    Login(AuthLoginArgs),
+    #[command(about = "Sign out and clear saved credentials.")]
+    Logout(AuthLogoutArgs),
+    #[command(about = "Show current authentication status.")]
+    Status,
+}
+
+#[derive(Args)]
+pub struct AuthLoginArgs {
+    #[arg(long, value_name = "EMAIL", help = "Email address (headless/CI login; omit to use browser).")]
+    pub email: Option<String>,
+    #[arg(long, value_name = "PASSWORD", help = "Password (headless/CI login; omit to use browser).")]
+    pub password: Option<String>,
+    #[arg(long, value_name = "URL", help = "Diagnosis server URL. Defaults to config value (http://127.0.0.1:8080).")]
+    pub server: Option<String>,
+}
+
+#[derive(Args)]
+pub struct AuthLogoutArgs {
+    #[arg(long, value_name = "URL", help = "Diagnosis server URL. Defaults to config value.")]
+    pub server: Option<String>,
+}
+
+// ── repair ──────────────────────────────────────────────────────────────────
+
+#[derive(Args)]
+pub struct RepairArgs {
+    #[arg(long, value_name = "TEXT", help = "Raw serial/crash output to diagnose. Reads from device if omitted.")]
+    pub serial: Option<String>,
+    #[arg(long, value_name = "MS", help = "How long to capture serial output from the device (default: 5000 ms).")]
+    pub capture_ms: Option<u32>,
+    #[arg(long, value_name = "PORT", help = "Serial port to read from. Falls back to config.")]
+    pub port: Option<String>,
+    #[arg(long, help = "Baud rate for serial capture. Falls back to config.")]
+    pub baud: Option<u32>,
+    #[arg(long, value_name = "ID", help = "Firmware build ID (hex hash of ELF). Enables symbol resolution when provided.")]
+    pub build_id: Option<String>,
+    #[arg(long, value_name = "FQBN", help = "Board FQBN hint for the diagnosis server.")]
+    pub board: Option<String>,
+    #[arg(long, value_name = "URL", help = "Diagnosis server URL. Defaults to config value.")]
+    pub server: Option<String>,
 }

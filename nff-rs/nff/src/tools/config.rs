@@ -20,6 +20,8 @@ pub struct Config {
     pub version: String,
     pub default_device: DeviceConfig,
     pub wokwi: WokwiConfig,
+    #[serde(default)]
+    pub diagnosis: DiagnosisConfig,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -58,6 +60,28 @@ fn default_timeout_ms() -> u32 {
     5000
 }
 
+fn default_server_url() -> String {
+    "http://127.0.0.1:8080".into()
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct DiagnosisConfig {
+    #[serde(default = "default_server_url")]
+    pub server_url: String,
+    pub access_token: Option<String>,
+    pub refresh_token: Option<String>,
+}
+
+impl Default for DiagnosisConfig {
+    fn default() -> Self {
+        DiagnosisConfig {
+            server_url: default_server_url(),
+            access_token: None,
+            refresh_token: None,
+        }
+    }
+}
+
 impl Default for WokwiConfig {
     fn default() -> Self {
         WokwiConfig {
@@ -74,6 +98,7 @@ impl Default for Config {
             version: "1".into(),
             default_device: DeviceConfig::default(),
             wokwi: WokwiConfig::default(),
+            diagnosis: DiagnosisConfig::default(),
         }
     }
 }
@@ -150,6 +175,32 @@ pub fn set_wokwi_diagram_path(path: Option<&str>) -> Result<(), ConfigError> {
 pub fn set_wokwi_timeout(ms: u32) -> Result<(), ConfigError> {
     let mut config = load()?;
     config.wokwi.default_timeout_ms = ms;
+    save(&config)
+}
+
+#[allow(dead_code)]
+pub fn get_diagnosis_config() -> Result<DiagnosisConfig, ConfigError> {
+    Ok(load()?.diagnosis)
+}
+
+pub fn set_diagnosis_tokens(access: &str, refresh: &str) -> Result<(), ConfigError> {
+    let mut config = load()?;
+    config.diagnosis.access_token = Some(access.into());
+    config.diagnosis.refresh_token = Some(refresh.into());
+    save(&config)
+}
+
+pub fn clear_diagnosis_tokens() -> Result<(), ConfigError> {
+    let mut config = load()?;
+    config.diagnosis.access_token = None;
+    config.diagnosis.refresh_token = None;
+    save(&config)
+}
+
+#[allow(dead_code)]
+pub fn set_diagnosis_server_url(url: &str) -> Result<(), ConfigError> {
+    let mut config = load()?;
+    config.diagnosis.server_url = url.into();
     save(&config)
 }
 
