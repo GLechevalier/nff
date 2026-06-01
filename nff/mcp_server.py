@@ -1,13 +1,18 @@
-"""nff MCP server — stdio transport using the Python mcp library."""
+"""nff MCP server — streamable-HTTP transport using the Python mcp library."""
 
 from __future__ import annotations
 
+import contextlib
 import json
+from collections.abc import AsyncIterator
 from typing import Any, Optional
 
+import uvicorn
 from mcp.server import Server
-from mcp.server.stdio import stdio_server
+from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from mcp.types import TextContent, Tool
+from starlette.applications import Starlette
+from starlette.routing import Mount
 
 import nff.tools.boards as boards_module
 import nff.tools.serial as serial_module
@@ -380,6 +385,29 @@ async def _call_tool(name: str, arguments: dict) -> list[TextContent]:
     return [TextContent(type="text", text=text)]
 
 
-async def run_server() -> None:
-    async with stdio_server() as (read_stream, write_stream):
-        await app.run(read_stream, write_stream, app.create_initialization_options())
+def _make_starlette_app() -> Starlette:
+    session_manager = StreamableHTTPSessionManager(
+        app=app,
+        json_response=False,
+        stateless=False,
+    )
+
+    @contextlib.asynccontextmanager
+    async def lifespan(_app: Starlette) -> AsyncIterator[None]:
+        async with session_manager.run():
+            yield
+
+    async def handle_mcp(scope, receive, send) -> None:
+        await session_manager.handle_request(scope, receive, send)
+
+    return Starlette(
+        routes=[Mount("/mcp", app=handle_mcp)],
+        lifespan=lifespan,
+    )
+
+
+async def run_server(host: str = "127.0.0.1", port: int = 3000) -> None:
+    starlette_app = _make_starlette_app()
+    config = uvicorn.Config(starlette_app, host=host, port=port, log_level="warning")
+    server = uvicorn.Server(config)
+    await server.serve()

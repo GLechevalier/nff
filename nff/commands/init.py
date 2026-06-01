@@ -1,8 +1,6 @@
 """nff init — interactive setup wizard."""
 
 import subprocess
-import sys
-from pathlib import Path
 
 import click
 
@@ -19,12 +17,11 @@ _SIM_BOARDS = [
 ]
 
 
-def _register_mcp():
-    exe = sys.executable
+def _register_mcp(host: str = "127.0.0.1", port: int = 3000) -> None:
     try:
-        nff_exe = Path(sys.argv[0]).resolve()
+        url = f"http://{host}:{port}/mcp"
         subprocess.run(
-            ["claude", "mcp", "add", "--scope", "user", "nff", str(nff_exe), "mcp"],
+            ["claude", "mcp", "add", "--scope", "user", "--transport", "http", "nff", url],
             check=False,
         )
     except Exception:
