@@ -61,7 +61,7 @@ fn default_timeout_ms() -> u32 {
 }
 
 fn default_server_url() -> String {
-    "http://127.0.0.1:8080".into()
+    "https://nanoforgeflow.com".into()
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

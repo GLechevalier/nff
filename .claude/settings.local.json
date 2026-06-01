@@ -13,7 +13,8 @@
       "Bash(./target/debug/nff mcp *)",
       "Bash(echo \"EXIT: $?\")",
       "Bash(\"D:\\\\IntraMap\\\\Carto\\\\R_D\\\\MCPIOT\\\\nff_cli_mcp\\\\nff\\\\nff-rs\\\\target\\\\release\\\\nff.exe\" mcp *)",
-      "Bash(\"D:/IntraMap/Carto/R_D/MCPIOT/nff_cli_mcp/nff/nff-rs/target/release/nff.exe\" mcp *)"
+      "Bash(\"D:/IntraMap/Carto/R_D/MCPIOT/nff_cli_mcp/nff/nff-rs/target/release/nff.exe\" mcp *)",
+      "Bash(python -m pytest tests/test_mcp.py -v --tb=short)"
     ]
   }
 }

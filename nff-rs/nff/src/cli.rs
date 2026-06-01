@@ -136,7 +136,7 @@ pub struct AuthLoginArgs {
     pub email: Option<String>,
     #[arg(long, value_name = "PASSWORD", help = "Password (headless/CI login; omit to use browser).")]
     pub password: Option<String>,
-    #[arg(long, value_name = "URL", help = "Diagnosis server URL. Defaults to config value (http://127.0.0.1:8080).")]
+    #[arg(long, value_name = "URL", help = "Diagnosis server URL. Defaults to config value (https://nanoforgeflow.com).")]
     pub server: Option<String>,
 }
 

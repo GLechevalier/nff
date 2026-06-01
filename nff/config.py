@@ -12,7 +12,7 @@ _DEFAULT = {
     "version": "1",
     "default_device": {"port": None, "board": None, "fqbn": None, "baud": 9600},
     "wokwi": {"api_token": None, "default_timeout_ms": 5000, "diagram_path": None},
-    "diagnosis": {"server_url": "http://127.0.0.1:8080", "access_token": None, "refresh_token": None},
+    "diagnosis": {"server_url": "https://nanoforgeflow.com", "frontend_url": "https://nanoforgeflow.com", "access_token": None, "refresh_token": None},
 }
 
 

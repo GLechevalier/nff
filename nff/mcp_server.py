@@ -2,17 +2,19 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
+import secrets
 from collections.abc import AsyncIterator
 from typing import Any, Optional
+from urllib.parse import parse_qs
 
 import uvicorn
 from mcp.server import Server
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from mcp.types import TextContent, Tool
-from starlette.applications import Starlette
-from starlette.routing import Mount
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 import nff.tools.boards as boards_module
 import nff.tools.serial as serial_module
@@ -207,7 +209,7 @@ async def authenticate(
 ) -> str:
     from nff.tools import auth as auth_tools
     cfg = config.get_diagnosis_config()
-    server_url = cfg.get("server_url", "http://127.0.0.1:8080")
+    server_url = cfg.get("server_url", "https://nanoforgeflow.com")
     if email and password:
         try:
             tokens = auth_tools.direct_login(server_url, email, password)
@@ -217,12 +219,17 @@ async def authenticate(
         try:
             sock, port = auth_tools.bind_callback_server()
             callback_url = f"http://127.0.0.1:{port}/callback"
-            portal_url = f"{server_url}/auth/portal?cb={auth_tools.percent_encode(callback_url)}"
+            frontend_url = cfg.get("frontend_url", "https://nanoforgeflow.com")
+            login_url = f"{frontend_url}/login?cb={auth_tools.percent_encode(callback_url)}"
+            _pending_browser_auth["sock"] = sock
             try:
-                auth_tools.open_browser(portal_url)
+                auth_tools.open_browser(login_url)
             except Exception:
                 pass
-            tokens = auth_tools.wait_for_callback(sock, 300)
+            return (
+                f"OK: browser opened — sign in at {login_url} "
+                "then call complete_authentication to finish"
+            )
         except Exception as exc:
             return f"ERROR: {exc}"
     else:
@@ -234,10 +241,33 @@ async def authenticate(
     return "OK: authenticated"
 
 
+async def complete_authentication(timeout: int = 120) -> str:
+    from nff.tools import auth as auth_tools
+    sock = _pending_browser_auth.pop("sock", None)
+    if sock is None:
+        return "ERROR: no pending browser authentication — call authenticate first"
+    _pending_browser_auth.clear()
+    loop = asyncio.get_event_loop()
+    try:
+        tokens = await asyncio.wait_for(
+            loop.run_in_executor(None, auth_tools.wait_for_callback, sock, timeout),
+            timeout=timeout + 5,
+        )
+    except (asyncio.TimeoutError, TimeoutError):
+        return "ERROR: authentication timed out — call authenticate to try again"
+    except Exception as exc:
+        return f"ERROR: {exc}"
+    try:
+        config.set_diagnosis_tokens(tokens.access_token, tokens.refresh_token)
+    except Exception as exc:
+        return f"ERROR: could not save tokens: {exc}"
+    return "OK: authenticated"
+
+
 async def auth_logout() -> str:
     import requests as _requests
     cfg = config.get_diagnosis_config()
-    server_url = cfg.get("server_url", "http://127.0.0.1:8080")
+    server_url = cfg.get("server_url", "https://nanoforgeflow.com")
     token = cfg.get("access_token")
     if token:
         try:
@@ -265,6 +295,86 @@ async def auth_status() -> str:
     return "ERROR: not authenticated — run `nff auth login`"
 
 
+async def auth_clear() -> str:
+    try:
+        config.clear_diagnosis_tokens()
+    except Exception as exc:
+        return f"ERROR: {exc}"
+    return "OK: tokens cleared"
+
+
+async def auth_reconnect(
+    email: Optional[str] = None,
+    password: Optional[str] = None,
+) -> str:
+    import subprocess
+    from nff.tools import auth as auth_tools
+
+    cfg = config.get_diagnosis_config()
+    server_url = cfg.get("server_url", "https://nanoforgeflow.com")
+
+    if email and password:
+        try:
+            tokens = auth_tools.direct_login(server_url, email, password)
+        except Exception as exc:
+            return f"ERROR: {exc}"
+    elif email is None and password is None:
+        try:
+            sock, port = auth_tools.bind_callback_server()
+            callback_url = f"http://127.0.0.1:{port}/callback"
+            frontend_url = cfg.get("frontend_url", "https://nanoforgeflow.com")
+            login_url = f"{frontend_url}/login?cb={auth_tools.percent_encode(callback_url)}"
+            _pending_browser_auth["sock"] = sock
+            try:
+                auth_tools.open_browser(login_url)
+            except Exception:
+                pass
+            tokens = await asyncio.wait_for(
+                asyncio.get_event_loop().run_in_executor(
+                    None, auth_tools.wait_for_callback, sock, 300
+                ),
+                timeout=305,
+            )
+            _pending_browser_auth.clear()
+        except (asyncio.TimeoutError, TimeoutError) as exc:
+            _pending_browser_auth.clear()
+            return "ERROR: authentication timed out"
+        except Exception as exc:
+            _pending_browser_auth.clear()
+            return f"ERROR: {exc}"
+    else:
+        return "ERROR: provide both email and password, or neither for browser login"
+
+    try:
+        config.set_diagnosis_tokens(tokens.access_token, tokens.refresh_token)
+    except Exception as exc:
+        return f"ERROR: could not save tokens: {exc}"
+
+    try:
+        result = subprocess.run(
+            [
+                "claude", "mcp", "add",
+                "--scope", "user",
+                "--transport", "http",
+                "--url", "http://127.0.0.1:3000/mcp",
+                "nff",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        if result.returncode != 0:
+            return (
+                "OK: authenticated but MCP re-registration failed — run manually: "
+                "claude mcp add --scope user --transport http "
+                "--url http://127.0.0.1:3000/mcp nff"
+            )
+    except Exception as exc:
+        return f"OK: authenticated but could not re-register MCP: {exc}"
+
+    return "OK: reconnected — Claude Code will re-authorize via OAuth on next connect"
+
+
 async def repair(
     serial_output: str,
     build_id: Optional[str] = None,
@@ -274,7 +384,7 @@ async def repair(
     from nff.tools import auth as auth_tools
     from nff.commands.repair import call_repair
     cfg = config.get_diagnosis_config()
-    server_url = cfg.get("server_url", "http://127.0.0.1:8080")
+    server_url = cfg.get("server_url", "https://nanoforgeflow.com")
     access_token = cfg.get("access_token")
     refresh_token = cfg.get("refresh_token")
     if not access_token:
@@ -336,13 +446,33 @@ _TOOLS = [
     Tool(name="wokwi_get_diagram", description="Return a minimal diagram.json for the given board FQBN",
          inputSchema={"type": "object", "properties": {"board": {"type": "string"}},
                       "required": ["board"]}),
-    Tool(name="authenticate", description="Log in to the nff diagnosis server",
+    Tool(name="authenticate",
+         description="Log in to the nff diagnosis server. Provide email+password for direct "
+                     "login. Omit both to open the browser login page and get a URL — then "
+                     "call complete_authentication once you have signed in.",
          inputSchema={"type": "object", "properties": {
              "email": {"type": "string"}, "password": {"type": "string"}}}),
+    Tool(name="complete_authentication",
+         description="Wait for a browser login started by authenticate() to complete and "
+                     "save the tokens. Optional timeout in seconds (default 120).",
+         inputSchema={"type": "object", "properties": {
+             "timeout": {"type": "integer", "default": 120}}}),
     Tool(name="auth_logout", description="Log out from the nff diagnosis server",
          inputSchema={"type": "object", "properties": {}}),
     Tool(name="auth_status", description="Return authentication status for the nff diagnosis server",
          inputSchema={"type": "object", "properties": {}}),
+    Tool(name="auth_clear",
+         description="Force-clear stored auth tokens locally without calling the server. "
+                     "Use when the server is unreachable or tokens are corrupted.",
+         inputSchema={"type": "object", "properties": {}}),
+    Tool(name="auth_reconnect",
+         description="Re-authenticate with the diagnosis server and re-register the MCP "
+                     "connection in Claude Code with the new Bearer token. Provide email+password "
+                     "for direct login, or omit both for browser OAuth. "
+                     "Restart Claude Code afterwards.",
+         inputSchema={"type": "object", "properties": {
+             "email": {"type": "string"},
+             "password": {"type": "string"}}}),
     Tool(name="repair", description="Send serial/crash output to the diagnosis server and return a structured diagnosis",
          inputSchema={"type": "object", "properties": {
              "serial_output": {"type": "string"}, "build_id": {"type": "string"},
@@ -361,10 +491,28 @@ _DISPATCH = {
     "wokwi_serial_read": wokwi_serial_read,
     "wokwi_get_diagram": wokwi_get_diagram,
     "authenticate": authenticate,
+    "complete_authentication": complete_authentication,
     "auth_logout": auth_logout,
     "auth_status": auth_status,
+    "auth_clear": auth_clear,
+    "auth_reconnect": auth_reconnect,
     "repair": repair,
 }
+
+# In-memory OAuth state (ephemeral — cleared on server restart, which forces a new login)
+_oauth_sessions: dict[str, dict] = {}  # session_id → {redirect_uri, state}
+_auth_codes: dict[str, str] = {}       # auth_code → access_token
+_pending_browser_auth: dict = {}       # at most one pending browser-login session
+
+
+async def _read_body(receive: Receive) -> bytes:
+    body = b""
+    while True:
+        msg = await receive()
+        body += msg.get("body", b"")
+        if not msg.get("more_body", False):
+            break
+    return body
 
 
 @app.list_tools()
@@ -385,29 +533,201 @@ async def _call_tool(name: str, arguments: dict) -> list[TextContent]:
     return [TextContent(type="text", text=text)]
 
 
-def _make_starlette_app() -> Starlette:
+class _NffASGI:
+    """ASGI app: OAuth 2.1 proxy endpoints + Bearer-authenticated /mcp transport."""
+
+    def __init__(self, session_manager: StreamableHTTPSessionManager) -> None:
+        self._sm = session_manager
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "lifespan":
+            await self._handle_lifespan(receive, send)
+        elif scope["type"] == "http":
+            path: str = scope.get("path", "")
+            if path.startswith("/.well-known/") or path.startswith("/oauth/"):
+                await self._handle_oauth_route(path, scope, receive, send)
+            elif path == "/mcp" or path.startswith("/mcp/"):
+                headers_dict = dict(scope.get("headers", []))
+                auth = headers_dict.get(b"authorization", b"").decode()
+                stored = config.get_diagnosis_config().get("access_token")
+                if not stored or auth != f"Bearer {stored}":
+                    await self._send_401(send)
+                    return
+                await self._sm.handle_request(scope, receive, send)
+            else:
+                await self._send_404(send)
+
+    async def _send_json(self, send: Send, status: int, data: dict,
+                         extra_headers: list | None = None) -> None:
+        body = json.dumps(data).encode()
+        headers: list = [
+            (b"content-type", b"application/json"),
+            (b"content-length", str(len(body)).encode()),
+        ]
+        if extra_headers:
+            headers.extend(extra_headers)
+        await send({"type": "http.response.start", "status": status, "headers": headers})
+        await send({"type": "http.response.body", "body": body})
+
+    async def _send_html(self, send: Send, status: int, html: str) -> None:
+        body = html.encode()
+        await send({"type": "http.response.start", "status": status,
+                    "headers": [(b"content-type", b"text/html; charset=utf-8"),
+                                (b"content-length", str(len(body)).encode())]})
+        await send({"type": "http.response.body", "body": body})
+
+    async def _send_redirect(self, send: Send, location: str) -> None:
+        await send({"type": "http.response.start", "status": 302,
+                    "headers": [(b"location", location.encode())]})
+        await send({"type": "http.response.body", "body": b""})
+
+    async def _send_401(self, send: Send) -> None:
+        await self._send_json(send, 401, {"error": "unauthorized"}, extra_headers=[
+            (b"www-authenticate",
+             b'Bearer realm="nff", '
+             b'resource_metadata="http://127.0.0.1:3000/.well-known/oauth-protected-resource"'),
+        ])
+
+    async def _send_404(self, send: Send) -> None:
+        await send({"type": "http.response.start", "status": 404, "headers": []})
+        await send({"type": "http.response.body", "body": b"Not Found"})
+
+    async def _handle_oauth_route(self, path: str, scope: Scope,
+                                   receive: Receive, send: Send) -> None:
+        method: str = scope.get("method", "GET")
+        qs = scope.get("query_string", b"").decode()
+        params = parse_qs(qs)
+
+        def first(key: str) -> str | None:
+            return params.get(key, [None])[0]
+
+        if path == "/.well-known/oauth-protected-resource":
+            await self._send_json(send, 200, {
+                "resource": "http://127.0.0.1:3000",
+                "authorization_servers": ["http://127.0.0.1:3000"],
+            })
+
+        elif path == "/.well-known/oauth-authorization-server":
+            await self._send_json(send, 200, {
+                "issuer": "http://127.0.0.1:3000",
+                "authorization_endpoint": "http://127.0.0.1:3000/oauth/authorize",
+                "token_endpoint": "http://127.0.0.1:3000/oauth/token",
+                "registration_endpoint": "http://127.0.0.1:3000/oauth/register",
+                "response_types_supported": ["code"],
+                "grant_types_supported": ["authorization_code"],
+                "code_challenge_methods_supported": ["S256"],
+            })
+
+        elif path == "/oauth/register" and method == "POST":
+            await self._send_json(send, 201, {
+                "client_id": "nff-mcp",
+                "client_secret": "unused",
+                "redirect_uris": [],
+                "grant_types": ["authorization_code"],
+                "response_types": ["code"],
+                "token_endpoint_auth_method": "none",
+            })
+
+        elif path == "/oauth/authorize":
+            redirect_uri = first("redirect_uri")
+            state = first("state") or ""
+            code_challenge = first("code_challenge") or ""
+            if not redirect_uri:
+                await self._send_json(send, 400, {"error": "missing redirect_uri"})
+                return
+            # Fast path: tokens already in config — no browser needed
+            cfg = config.get_diagnosis_config()
+            existing_token = cfg.get("access_token")
+            if existing_token:
+                auth_code = secrets.token_urlsafe(32)
+                _auth_codes[auth_code] = existing_token
+                sep = "&" if "?" in redirect_uri else "?"
+                await self._send_redirect(send, f"{redirect_uri}{sep}code={auth_code}&state={state}")
+                return
+            session_id = secrets.token_urlsafe(16)
+            _oauth_sessions[session_id] = {
+                "redirect_uri": redirect_uri,
+                "state": state,
+                "code_challenge": code_challenge,
+            }
+            server_url = cfg.get("server_url", "https://nanoforgeflow.com")
+            callback_url = f"http://127.0.0.1:3000/oauth/callback/{session_id}"
+            from nff.tools.auth import percent_encode
+            frontend_url = cfg.get("frontend_url", "https://nanoforgeflow.com")
+            login_url = f"{frontend_url}/login?cb={percent_encode(callback_url)}"
+            await self._send_redirect(send, login_url)
+
+        elif path.startswith("/oauth/callback/"):
+            session_id = path[len("/oauth/callback/"):]
+            session = _oauth_sessions.pop(session_id, None)
+            access_token = first("access_token")
+            refresh_token = first("refresh_token") or ""
+            if not access_token:
+                await self._send_json(send, 400, {"error": "missing access_token in callback"})
+                return
+            try:
+                config.set_diagnosis_tokens(access_token, refresh_token)
+            except Exception:
+                pass
+            if not session:
+                # Session expired (server restarted mid-flow). Tokens are saved —
+                # show a success page so the user knows to reconnect Claude Code.
+                await self._send_html(send, 200,
+                    "<h2>Authenticated!</h2>"
+                    "<p>Tokens saved. Please reconnect the nff MCP server in Claude Code "
+                    "(Settings &rsaquo; MCP &rsaquo; nff &rsaquo; Reconnect) to complete "
+                    "the handshake.</p>"
+                )
+                return
+            auth_code = secrets.token_urlsafe(32)
+            _auth_codes[auth_code] = access_token
+            sep = "&" if "?" in session["redirect_uri"] else "?"
+            location = (
+                f"{session['redirect_uri']}{sep}"
+                f"code={auth_code}&state={session['state']}"
+            )
+            await self._send_redirect(send, location)
+
+        elif path == "/oauth/token" and method == "POST":
+            body = await _read_body(receive)
+            token_params = parse_qs(body.decode())
+
+            def tp(key: str) -> str | None:
+                return token_params.get(key, [None])[0]
+
+            code = tp("code")
+            if not code or code not in _auth_codes:
+                await self._send_json(send, 400, {"error": "invalid_grant"})
+                return
+            access_token = _auth_codes.pop(code)
+            await self._send_json(send, 200, {
+                "access_token": access_token,
+                "token_type": "bearer",
+                "expires_in": 3600,
+            })
+
+        else:
+            await self._send_404(send)
+
+    async def _handle_lifespan(self, receive: Receive, send: Send) -> None:
+        async with self._sm.run():
+            await receive()  # lifespan.startup
+            await send({"type": "lifespan.startup.complete"})
+            await receive()  # lifespan.shutdown
+            await send({"type": "lifespan.shutdown.complete"})
+
+
+def _make_starlette_app() -> _NffASGI:
     session_manager = StreamableHTTPSessionManager(
         app=app,
         json_response=False,
         stateless=False,
     )
-
-    @contextlib.asynccontextmanager
-    async def lifespan(_app: Starlette) -> AsyncIterator[None]:
-        async with session_manager.run():
-            yield
-
-    async def handle_mcp(scope, receive, send) -> None:
-        await session_manager.handle_request(scope, receive, send)
-
-    return Starlette(
-        routes=[Mount("/mcp", app=handle_mcp)],
-        lifespan=lifespan,
-    )
+    return _NffASGI(session_manager)
 
 
 async def run_server(host: str = "127.0.0.1", port: int = 3000) -> None:
-    starlette_app = _make_starlette_app()
-    config = uvicorn.Config(starlette_app, host=host, port=port, log_level="warning")
+    asgi_app = _make_starlette_app()
+    config = uvicorn.Config(asgi_app, host=host, port=port, log_level="warning")
     server = uvicorn.Server(config)
     await server.serve()

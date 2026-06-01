@@ -98,6 +98,85 @@ Python package via subprocess.
 `NffServer` with the `#[tool(...)]` attribute. Do not edit `nff/nff/mcp_server.py`; it is
 superseded.
 
+## Claude ↔ nff Handshake
+
+### 1. Registration (`nff init`)
+
+`nff init` calls `register_mcp_claude_code()` (`commands/init.rs`) which runs:
+
+```
+claude mcp add --scope user nff <nff_exe_path> mcp
+```
+
+This makes Claude Code aware of `nff mcp` as a user-scoped MCP server. The correct full
+form that includes the HTTP transport and Bearer token is:
+
+```
+claude mcp add --scope user --transport http \
+  --url http://127.0.0.1:3000/mcp \
+  --header "Authorization: Bearer <access_token>" nff
+```
+
+> **Gap:** `register_mcp_claude_code()` currently omits `--transport http`, `--url`, and
+> `--header`. Until this is fixed, run the full command above manually after `nff auth login`.
+
+### 2. Transport
+
+`nff mcp` starts a **streamable HTTP MCP server** on `http://127.0.0.1:3000/mcp`
+(default; override with `--host` / `--port`). All MCP messages — initialize, tools/list,
+tools/call — are HTTP POST requests to that path, handled by the `rmcp` crate.
+
+### 3. Bearer authentication
+
+Every request to `/mcp` passes through the `bearer_auth` axum middleware
+(`mcp_server.rs`). It validates `Authorization: Bearer <token>` against
+`config.diagnosis.access_token` in `~/.nff/config.json`. A missing or wrong token
+returns HTTP 401 and Claude surfaces an "Unauthorized" error for every tool call.
+
+**One-time bootstrap order:**
+
+```
+1. nff auth login        # browser OAuth or direct email/password login
+                         # → writes access_token + refresh_token to ~/.nff/config.json
+2. nff init              # detects board, writes config, then calls register_mcp_claude_code()
+                         # (or register manually with the --header form above)
+3. Restart Claude Code   # Claude picks up the new MCP registration
+```
+
+### 4. Tool call flow
+
+```
+Claude Code
+    │
+    │  HTTP POST  http://127.0.0.1:3000/mcp
+    │  Authorization: Bearer <access_token>
+    │  Body: MCP tools/call { "name": "...", "arguments": {...} }
+    ▼
+nff mcp server  (bearer_auth validates token vs ~/.nff/config.json)
+    │
+    ├──► local tools
+    │       list_devices, flash, serial_read, serial_write,
+    │       reset_device, get_device_info,
+    │       wokwi_flash, wokwi_serial_read, wokwi_get_diagram
+    │       — operate on local hardware / toolchain; no further auth
+    │
+    └──► diagnosis tools
+            authenticate, auth_status, auth_logout, repair
+            — POST to config.diagnosis.server_url (/api/auth/*, /api/repair)
+            — repair auto-refreshes the access_token on 401 using stored refresh_token;
+              clears tokens and returns ERROR: session expired if refresh also fails
+```
+
+### 5. Response conventions
+
+| Result type | Format |
+|---|---|
+| Success (scalar) | `"OK: …"` string |
+| Failure | `"ERROR: …"` string |
+| Structured data | JSON string (`list_devices`, `get_device_info`, `wokwi_flash`, `repair`) |
+
+Claude can branch on the `OK:` / `ERROR:` prefix without parsing JSON for scalar results.
+
 ## Migration Scope
 
 **IN (rewrite in Rust):**
