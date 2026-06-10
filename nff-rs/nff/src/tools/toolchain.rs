@@ -201,6 +201,15 @@ fn run(cmd: &[&str]) -> Result<RunResult, ToolchainError> {
     })
 }
 
+/// arduino-cli `--build-property` value that bakes the fqbn into the firmware as
+/// `NFF_FQBN_TOKEN`. The nff SDK stringifies it into its heartbeat so a device
+/// reports exactly what it was built as. Passed as a bare (unquoted) token to
+/// avoid cross-shell quoting of the colons in an fqbn; `compiler.cpp.extra_flags`
+/// is the conventional empty user-flag slot, so overriding it clobbers nothing.
+fn fqbn_build_property(fqbn: &str) -> String {
+    format!("compiler.cpp.extra_flags=-DNFF_FQBN_TOKEN={fqbn}")
+}
+
 pub fn compile_sketch(sketch_dir: &Path, fqbn: &str) -> Result<RunResult, ToolchainError> {
     let exe = require_arduino_cli()?;
     let output_dir = elf_path_for(sketch_dir, fqbn)
@@ -208,10 +217,12 @@ pub fn compile_sketch(sketch_dir: &Path, fqbn: &str) -> Result<RunResult, Toolch
         .unwrap()
         .to_path_buf();
     std::fs::create_dir_all(&output_dir)?;
+    let build_prop = fqbn_build_property(fqbn);
     let cmd_strs = [
         exe.to_str().unwrap_or("arduino-cli"),
         "compile",
         "--fqbn", fqbn,
+        "--build-property", &build_prop,
         "--output-dir", output_dir.to_str().unwrap_or(""),
         sketch_dir.to_str().unwrap_or(""),
     ];
@@ -276,6 +287,7 @@ pub fn stream_compile(sketch_dir: &Path, fqbn: &str) -> Result<ProcessStream, To
         exe.to_str().unwrap_or("arduino-cli").to_string(),
         "compile".into(),
         "--fqbn".into(), fqbn.into(),
+        "--build-property".into(), fqbn_build_property(fqbn),
         "--output-dir".into(), output_dir.to_str().unwrap_or("").to_string(),
         sketch_dir.to_str().unwrap_or("").to_string(),
     ]))

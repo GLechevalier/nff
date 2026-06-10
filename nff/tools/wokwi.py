@@ -55,15 +55,28 @@ def generate_diagram(fqbn: str) -> dict:
     }
 
 
-def write_wokwi_toml(project_dir: Path, elf_path: Path) -> Path:
+def _rel(project_dir: Path, p: Path) -> str:
     try:
-        rel = elf_path.relative_to(project_dir)
+        rel = p.relative_to(project_dir)
     except ValueError:
-        rel = elf_path
-    rel_str = str(rel).replace("\\", "/")
+        rel = p
+    return str(rel).replace("\\", "/")
+
+
+def write_wokwi_toml(project_dir: Path, elf_path: Path,
+                     firmware_path: Optional[Path] = None) -> Path:
+    """Write wokwi.toml. ``elf`` drives the simulator; ``firmware`` is the
+    merged image for real hardware. If ``firmware_path`` is omitted we look for
+    the sibling ``*.merged.bin`` so the field is correct instead of empty."""
+    elf_str = _rel(project_dir, elf_path)
+    if firmware_path is None:
+        merged = elf_path.with_name(elf_path.name.replace(".ino.elf", ".ino.merged.bin"))
+        if merged.exists():
+            firmware_path = merged
+    fw_str = _rel(project_dir, firmware_path) if firmware_path else ""
     toml_path = project_dir / "wokwi.toml"
     toml_path.write_text(
-        f'[wokwi]\nversion = 1\nelf = "{rel_str}"\nfirmware = ""\n',
+        f'[wokwi]\nversion = 1\nelf = "{elf_str}"\nfirmware = "{fw_str}"\n',
         encoding="utf-8",
     )
     return toml_path

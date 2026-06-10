@@ -67,16 +67,59 @@ async def list_devices() -> dict:
     }
 
 
+def _resolve_fqbn(board: Optional[str]) -> str:
+    fqbn = board or config.get_default_device().get("fqbn") or ""
+    if not fqbn:
+        raise ValueError("Missing board FQBN — pass board= or run `nff init`")
+    return fqbn
+
+
+async def compile(
+    code: Optional[str] = None,
+    sketch: Optional[str] = None,
+    board: Optional[str] = None,
+) -> dict:
+    """Compile only — no port, no upload. Returns structured artifacts."""
+    from pathlib import Path
+    try:
+        fqbn = _resolve_fqbn(board)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    if not code and not sketch:
+        return {"ok": False,
+                "error": "provide sketch= (path to .ino or folder) or code="}
+    try:
+        result = toolchain.compile_only(
+            fqbn,
+            code=code,
+            source=Path(sketch) if sketch else None,
+        )
+    except toolchain.ToolchainError as exc:
+        return {"ok": False, "fqbn": fqbn, "error": str(exc)}
+    except Exception as exc:  # pragma: no cover - defensive
+        return {"ok": False, "fqbn": fqbn, "error": f"{type(exc).__name__}: {exc}"}
+    return result.to_dict()
+
+
 async def flash(
-    code: str,
+    code: Optional[str] = None,
     board: Optional[str] = None,
     port: Optional[str] = None,
+    sketch: Optional[str] = None,
 ) -> str:
+    from pathlib import Path
+    if not code and not sketch:
+        return "ERROR: provide sketch= (path to .ino or folder) or code="
     try:
         fqbn, resolved_port = _resolve_fqbn_and_port(board, port)
     except ValueError as exc:
         return f"ERROR: {exc}"
-    return toolchain.flash(code, fqbn, resolved_port)
+    return toolchain.flash(
+        code=code,
+        fqbn=fqbn,
+        port=resolved_port,
+        source=Path(sketch) if sketch else None,
+    )
 
 
 async def serial_read(
@@ -356,7 +399,7 @@ async def auth_reconnect(
                 "claude", "mcp", "add",
                 "--scope", "user",
                 "--transport", "http",
-                "--url", "http://127.0.0.1:3000/mcp",
+                "--url", "http://127.0.0.1:3001/mcp",
                 "nff",
             ],
             capture_output=True,
@@ -367,7 +410,7 @@ async def auth_reconnect(
             return (
                 "OK: authenticated but MCP re-registration failed — run manually: "
                 "claude mcp add --scope user --transport http "
-                "--url http://127.0.0.1:3000/mcp nff"
+                "--url http://127.0.0.1:3001/mcp nff"
             )
     except Exception as exc:
         return f"OK: authenticated but could not re-register MCP: {exc}"
@@ -417,10 +460,23 @@ app = Server("nff")
 _TOOLS = [
     Tool(name="list_devices", description="List all connected USB/serial devices with board identification",
          inputSchema={"type": "object", "properties": {}}),
-    Tool(name="flash", description="Compile and upload an Arduino/ESP sketch to the connected board",
+    Tool(name="compile",
+         description="Compile a sketch ONLY — no board or port needed. Use this to verify a "
+                     "sketch builds. Pass sketch= (path to a .ino file or sketch folder, "
+                     "preferred) or code=. board= defaults to the configured FQBN. Returns "
+                     "JSON: {ok, fqbn, elf, image, artifacts, errors, output}.",
          inputSchema={"type": "object", "properties": {
-             "code": {"type": "string"}, "board": {"type": "string"}, "port": {"type": "string"}},
-             "required": ["code"]}),
+             "sketch": {"type": "string", "description": "Path to a .ino file or sketch folder"},
+             "code": {"type": "string", "description": "Raw sketch source (alternative to sketch=)"},
+             "board": {"type": "string", "description": "Board FQBN; defaults to configured board"}}}),
+    Tool(name="flash",
+         description="Compile AND upload a sketch to the connected board (needs a port). "
+                     "To only check that a sketch builds, use `compile` instead. Pass "
+                     "sketch= (path, preferred) or code=.",
+         inputSchema={"type": "object", "properties": {
+             "sketch": {"type": "string", "description": "Path to a .ino file or sketch folder"},
+             "code": {"type": "string", "description": "Raw sketch source (alternative to sketch=)"},
+             "board": {"type": "string"}, "port": {"type": "string"}}}),
     Tool(name="serial_read", description="Capture serial output from the device for a given duration",
          inputSchema={"type": "object", "properties": {
              "duration_ms": {"type": "integer", "default": 3000},
@@ -482,6 +538,7 @@ _TOOLS = [
 
 _DISPATCH = {
     "list_devices": list_devices,
+    "compile": compile,
     "flash": flash,
     "serial_read": serial_read,
     "serial_write": serial_write,
@@ -536,8 +593,10 @@ async def _call_tool(name: str, arguments: dict) -> list[TextContent]:
 class _NffASGI:
     """ASGI app: OAuth 2.1 proxy endpoints + Bearer-authenticated /mcp transport."""
 
-    def __init__(self, session_manager: StreamableHTTPSessionManager) -> None:
+    def __init__(self, session_manager: StreamableHTTPSessionManager,
+                 host: str = "127.0.0.1", port: int = 3001) -> None:
         self._sm = session_manager
+        self._base = f"http://{host}:{port}"
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] == "lifespan":
@@ -582,10 +641,10 @@ class _NffASGI:
         await send({"type": "http.response.body", "body": b""})
 
     async def _send_401(self, send: Send) -> None:
+        rm = f'{self._base}/.well-known/oauth-protected-resource'.encode()
         await self._send_json(send, 401, {"error": "unauthorized"}, extra_headers=[
             (b"www-authenticate",
-             b'Bearer realm="nff", '
-             b'resource_metadata="http://127.0.0.1:3000/.well-known/oauth-protected-resource"'),
+             b'Bearer realm="nff", resource_metadata="' + rm + b'"'),
         ])
 
     async def _send_404(self, send: Send) -> None:
@@ -603,16 +662,16 @@ class _NffASGI:
 
         if path == "/.well-known/oauth-protected-resource":
             await self._send_json(send, 200, {
-                "resource": "http://127.0.0.1:3000",
-                "authorization_servers": ["http://127.0.0.1:3000"],
+                "resource": self._base,
+                "authorization_servers": [self._base],
             })
 
         elif path == "/.well-known/oauth-authorization-server":
             await self._send_json(send, 200, {
-                "issuer": "http://127.0.0.1:3000",
-                "authorization_endpoint": "http://127.0.0.1:3000/oauth/authorize",
-                "token_endpoint": "http://127.0.0.1:3000/oauth/token",
-                "registration_endpoint": "http://127.0.0.1:3000/oauth/register",
+                "issuer": self._base,
+                "authorization_endpoint": f"{self._base}/oauth/authorize",
+                "token_endpoint": f"{self._base}/oauth/token",
+                "registration_endpoint": f"{self._base}/oauth/register",
                 "response_types_supported": ["code"],
                 "grant_types_supported": ["authorization_code"],
                 "code_challenge_methods_supported": ["S256"],
@@ -651,7 +710,7 @@ class _NffASGI:
                 "code_challenge": code_challenge,
             }
             server_url = cfg.get("server_url", "https://nanoforgeflow.com")
-            callback_url = f"http://127.0.0.1:3000/oauth/callback/{session_id}"
+            callback_url = f"{self._base}/oauth/callback/{session_id}"
             from nff.tools.auth import percent_encode
             frontend_url = cfg.get("frontend_url", "https://nanoforgeflow.com")
             login_url = f"{frontend_url}/login?cb={percent_encode(callback_url)}"
@@ -717,17 +776,17 @@ class _NffASGI:
             await send({"type": "lifespan.shutdown.complete"})
 
 
-def _make_starlette_app() -> _NffASGI:
+def _make_starlette_app(host: str = "127.0.0.1", port: int = 3001) -> _NffASGI:
     session_manager = StreamableHTTPSessionManager(
         app=app,
         json_response=False,
         stateless=False,
     )
-    return _NffASGI(session_manager)
+    return _NffASGI(session_manager, host=host, port=port)
 
 
-async def run_server(host: str = "127.0.0.1", port: int = 3000) -> None:
-    asgi_app = _make_starlette_app()
+async def run_server(host: str = "127.0.0.1", port: int = 3001) -> None:
+    asgi_app = _make_starlette_app(host=host, port=port)
     config = uvicorn.Config(asgi_app, host=host, port=port, log_level="warning")
     server = uvicorn.Server(config)
     await server.serve()

@@ -8,15 +8,20 @@ from unittest.mock import patch, MagicMock
 import pytest
 
 from nff.tools.toolchain import (
+    CompileResult,
     ProcessStream,
     RunResult,
     ToolchainError,
     _require_arduino_cli,
     _run,
+    compile_only,
+    discover_artifacts,
+    elf_path_for,
     esptool_flash,
     find_arduino_cli,
     find_esptool,
     flash,
+    resolve_sketch_dir,
     write_sketch,
 )
 
@@ -258,6 +263,137 @@ def test_flash_includes_compile_output_in_ok_result(tmp_path, monkeypatch):
                         lambda *a: _ok_result(stdout=""))
     result = flash("void setup(){}", "arduino:avr:uno", "COM3", sketch_dir=tmp_path)
     assert "42 bytes" in result
+
+
+# ---------------------------------------------------------------------------
+# resolve_sketch_dir — file / folder / code normalisation
+# ---------------------------------------------------------------------------
+
+def test_resolve_sketch_dir_accepts_folder(tmp_path):
+    sketch = tmp_path / "blink"
+    sketch.mkdir()
+    (sketch / "blink.ino").write_text("void setup(){}")
+    assert resolve_sketch_dir(source=sketch) == sketch
+
+
+def test_resolve_sketch_dir_folder_without_ino_raises(tmp_path):
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    with pytest.raises(ToolchainError, match="No .ino"):
+        resolve_sketch_dir(source=empty)
+
+
+def test_resolve_sketch_dir_ino_with_matching_parent(tmp_path):
+    sketch = tmp_path / "blink"
+    sketch.mkdir()
+    ino = sketch / "blink.ino"
+    ino.write_text("void setup(){}")
+    assert resolve_sketch_dir(source=ino) == sketch
+
+
+def test_resolve_sketch_dir_loose_ino_is_copied_into_named_folder(tmp_path):
+    loose = tmp_path / "blink.ino"
+    loose.write_text("void loop(){}")
+    dest = tmp_path / "out"
+    result = resolve_sketch_dir(source=loose, sketch_dir=dest)
+    assert (result / f"{result.name}.ino").read_text() == "void loop(){}"
+
+
+def test_resolve_sketch_dir_from_code(tmp_path):
+    result = resolve_sketch_dir(code="void setup(){}", sketch_dir=tmp_path / "s")
+    assert (result / "s.ino").read_text() == "void setup(){}"
+
+
+def test_resolve_sketch_dir_requires_some_input():
+    with pytest.raises(ToolchainError, match="either code"):
+        resolve_sketch_dir()
+
+
+# ---------------------------------------------------------------------------
+# discover_artifacts / elf_path_for — deterministic build layout
+# ---------------------------------------------------------------------------
+
+def test_elf_path_for_uses_dotted_fqbn(tmp_path):
+    sd = tmp_path / "blink"
+    sd.mkdir()
+    elf = elf_path_for(sd, "esp32:esp32:esp32")
+    assert elf == sd / "build" / "esp32.esp32.esp32" / "blink.ino.elf"
+
+
+def test_discover_artifacts_finds_elf_and_image(tmp_path):
+    sd = tmp_path / "blink"
+    build = sd / "build" / "esp32.esp32.esp32"
+    build.mkdir(parents=True)
+    (build / "blink.ino.elf").write_bytes(b"elf")
+    (build / "blink.ino.bin").write_bytes(b"bin")
+    (build / "blink.ino.merged.bin").write_bytes(b"merged")
+    arts = discover_artifacts(sd, "esp32:esp32:esp32")
+    assert arts["elf"].name == "blink.ino.elf"
+    assert arts["merged_bin"].name == "blink.ino.merged.bin"
+
+
+def test_discover_artifacts_empty_when_nothing_built(tmp_path):
+    sd = tmp_path / "blink"
+    sd.mkdir()
+    assert discover_artifacts(sd, "esp32:esp32:esp32") == {}
+
+
+# ---------------------------------------------------------------------------
+# compile_only — structured, port-free compile
+# ---------------------------------------------------------------------------
+
+def test_compile_only_requires_fqbn():
+    with pytest.raises(ToolchainError, match="FQBN"):
+        compile_only("", code="void setup(){}")
+
+
+def test_compile_only_requires_arduino_cli(monkeypatch):
+    monkeypatch.setattr("nff.tools.toolchain.find_arduino_cli", lambda: None)
+    with pytest.raises(ToolchainError, match="arduino-cli not found"):
+        compile_only("arduino:avr:uno", code="void setup(){}")
+
+
+def test_compile_only_success_collects_artifacts(tmp_path, monkeypatch):
+    monkeypatch.setattr("nff.tools.toolchain.find_arduino_cli", lambda: "/fake/cli")
+
+    def fake_compile(sd, fqbn):
+        build = sd / "build" / fqbn.replace(":", ".")
+        build.mkdir(parents=True, exist_ok=True)
+        (build / f"{sd.name}.ino.elf").write_bytes(b"elf")
+        (build / f"{sd.name}.ino.merged.bin").write_bytes(b"bin")
+        return _ok_result(stdout="Sketch uses 1000 bytes (3%)")
+
+    monkeypatch.setattr("nff.tools.toolchain.compile_sketch", fake_compile)
+    result = compile_only("esp32:esp32:esp32", code="void setup(){}",
+                          sketch_dir=tmp_path / "blink")
+    assert isinstance(result, CompileResult)
+    assert result.ok
+    assert result.elf is not None and result.elf.suffix == ".elf"
+    assert result.image is not None and result.image.name.endswith(".merged.bin")
+    assert "OK: compile succeeded" in result.summary()
+
+
+def test_compile_only_failure_reports_errors(tmp_path, monkeypatch):
+    monkeypatch.setattr("nff.tools.toolchain.find_arduino_cli", lambda: "/fake/cli")
+    monkeypatch.setattr("nff.tools.toolchain.compile_sketch",
+                        lambda sd, fqbn: _fail_result(stderr="blink.ino:3:1: error: expected ';'"))
+    result = compile_only("arduino:avr:uno", code="void setup(){", sketch_dir=tmp_path / "blink")
+    assert not result.ok
+    assert result.elf is None
+    assert any("error:" in e for e in result.errors)
+    assert result.summary().startswith("ERROR:")
+
+
+def test_compile_only_accepts_a_folder(tmp_path, monkeypatch):
+    monkeypatch.setattr("nff.tools.toolchain.find_arduino_cli", lambda: "/fake/cli")
+    sketch = tmp_path / "blink"
+    sketch.mkdir()
+    (sketch / "blink.ino").write_text("void setup(){}")
+    monkeypatch.setattr("nff.tools.toolchain.compile_sketch",
+                        lambda sd, fqbn: _ok_result(stdout="ok"))
+    result = compile_only("arduino:avr:uno", source=sketch)
+    assert result.sketch_dir == sketch
+    assert result.ok
 
 
 # ---------------------------------------------------------------------------

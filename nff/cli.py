@@ -5,6 +5,7 @@ import click
 from nff import __version__
 from nff.commands.auth_cmd import auth_cli
 from nff.commands.clean import clean
+from nff.commands.compile_cmd import compile_cmd
 from nff.commands.connect import connect
 from nff.commands.doctor import doctor
 from nff.commands.flash import flash
@@ -24,6 +25,7 @@ def cli():
 
 
 cli.add_command(init)
+cli.add_command(compile_cmd)
 cli.add_command(flash)
 cli.add_command(monitor)
 cli.add_command(doctor)

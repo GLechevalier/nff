@@ -1,7 +1,8 @@
 # nff — Wokwi Simulation Context
 
 ## Hard Rules
-- Always use `nff flash --sim` to compile — never call arduino-cli directly.
+- To check a sketch builds, use `nff compile <sketch>` (no board/port needed) — never call arduino-cli directly.
+- Use `nff flash --sim` to compile + simulate, and `nff flash <sketch>` to upload to hardware.
 - Always use `nff wokwi run` or `nff wokwi run --gui` to simulate.
 - Never install libraries with arduino-cli. Use built-in ESP32 APIs only,
   or ask the user to install the library first.
@@ -87,16 +88,23 @@ Always set minAngle: "-90" and maxAngle: "90" on wokwi-servo in diagram.json.
 
 ## Status
 
-The Python `nff` binary has been fully replaced by a compiled Rust binary — single executable,
-no Python runtime required for end users, stronger types, better cross-platform packaging.
+> **CURRENT (2026-06): the Python package under `nff/nff/` is the active development surface.**
+> The Rust port (`nff-rs/`) is paused — do **not** treat it as the source of truth and do **not**
+> skip editing the Python files. `nff/nff/mcp_server.py`, `tools/toolchain.py`, and the commands
+> are the live implementation; new features (e.g. the port-free `compile` tool) land here first.
+> The Rust migration notes below are retained for when that work resumes later.
+
+The Rust port aimed to replace the Python `nff` with a single compiled binary — no Python runtime
+for end users, stronger types, better cross-platform packaging.
 
 The MCP server is now native Rust (`nff-rs/nff/src/mcp_server.rs`, rmcp crate). Wokwi
 integration is also native Rust (`tools/wokwi.rs`). Only `nff test` still delegates to the
 Python package via subprocess.
 
-**Adding a new MCP tool:** add it to `nff-rs/nff/src/mcp_server.rs` — implement a method on
-`NffServer` with the `#[tool(...)]` attribute. Do not edit `nff/nff/mcp_server.py`; it is
-superseded.
+**Adding a new MCP tool (current Python flow):** add an `async def` handler in
+`nff/nff/mcp_server.py`, register it in both `_TOOLS` (with an `inputSchema`) and `_DISPATCH`.
+Local hardware/toolchain logic lives in `nff/nff/tools/`. *(When the Rust port resumes, the
+equivalent is a `#[tool(...)]` method on `NffServer` in `nff-rs/nff/src/mcp_server.rs`.)*
 
 ## Claude ↔ nff Handshake
 

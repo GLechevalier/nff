@@ -1,4 +1,7 @@
-"""nff flash — compile and upload a sketch."""
+"""nff flash — compile and upload a sketch (or simulate with --sim)."""
+
+import json
+import pathlib
 
 import click
 from rich.console import Console
@@ -18,40 +21,41 @@ console = Console()
 @click.option("--sim", is_flag=True, help="Run in Wokwi simulator instead of hardware")
 @click.option("--sim-timeout", default=5000, type=int, metavar="MS")
 def flash(file, board, port, baud, manual_reset, sim, sim_timeout):
-    """Compile and flash a sketch to the device (or simulate with --sim)."""
-    import pathlib
-    sketch_path = pathlib.Path(file)
-    code = sketch_path.read_text(encoding="utf-8")
+    """Compile and flash a sketch to the device (or simulate with --sim).
 
+    FILE may be a .ino file or a sketch folder. To only check that a sketch
+    builds (no board needed), use `nff compile` instead.
+    """
     # Resolve FQBN
-    fqbn = board
-    if not fqbn:
-        fqbn = config.get_default_device().get("fqbn") or ""
+    fqbn = board or config.get_default_device().get("fqbn") or ""
     if not fqbn:
         raise click.ClickException("No board FQBN — pass --board or run `nff init`")
 
+    # Normalise the sketch into a compilable folder (handles .ino files and dirs).
+    try:
+        sketch_dir = toolchain.resolve_sketch_dir(source=pathlib.Path(file))
+    except toolchain.ToolchainError as exc:
+        raise click.ClickException(str(exc))
+
     if sim:
-        runner = wokwi_module.WokwiRunner()
-        import tempfile, json
-        from pathlib import Path
-        sketch_dir = toolchain.write_sketch(code)
         console.print("[bold]Compiling…[/bold]")
-        compile_result = toolchain.compile_sketch(sketch_dir, fqbn)
-        if not compile_result.success:
-            raise click.ClickException(f"Compile failed:\n{compile_result.output}")
-        elf = toolchain.locate_compiled_elf(sketch_dir, fqbn)
+        result = toolchain.compile_only(fqbn, source=pathlib.Path(file))
+        if not result.ok:
+            raise click.ClickException(f"Compile failed:\n{result.output}")
+        elf = result.elf
         diagram = wokwi_module.generate_diagram(fqbn)
         (sketch_dir / "diagram.json").write_text(
             json.dumps(diagram, indent=2), encoding="utf-8"
         )
-        wokwi_module.write_wokwi_toml(sketch_dir, elf)
+        wokwi_module.write_wokwi_toml(sketch_dir, elf, firmware_path=result.image)
         console.print("[bold]Simulating…[/bold]")
-        result = runner.run(sketch_dir, timeout_ms=sim_timeout, elf=elf)
-        if result.serial_output:
-            click.echo(result.serial_output)
+        runner = wokwi_module.WokwiRunner()
+        sim_result = runner.run(sketch_dir, timeout_ms=sim_timeout, elf=elf)
+        if sim_result.serial_output:
+            click.echo(sim_result.serial_output)
         return
 
-    # Resolve port
+    # Resolve port (hardware path only)
     resolved_port = port or config.get_default_device().get("port") or ""
     if not resolved_port:
         detected = boards_module.find_device()
@@ -63,16 +67,17 @@ def flash(file, board, port, baud, manual_reset, sim, sim_timeout):
     if manual_reset:
         click.pause("Press Enter after manually resetting the board…")
 
-    sketch_dir = toolchain.write_sketch(code)
-
     console.print("[bold]Compiling…[/bold]")
-    for line in toolchain.stream_compile(sketch_dir, fqbn):
+    compile_stream = toolchain.stream_compile(sketch_dir, fqbn)
+    for line in compile_stream:
         click.echo(line)
+    if compile_stream.returncode and compile_stream.returncode != 0:
+        raise click.ClickException("Compile failed")
 
     console.print("[bold]Uploading…[/bold]")
-    stream = toolchain.stream_upload(sketch_dir, fqbn, resolved_port)
-    for line in stream:
+    upload_stream = toolchain.stream_upload(sketch_dir, fqbn, resolved_port)
+    for line in upload_stream:
         click.echo(line)
-    if stream.returncode and stream.returncode != 0:
+    if upload_stream.returncode and upload_stream.returncode != 0:
         raise click.ClickException("Upload failed")
     console.print("[green]Flash complete[/green]")

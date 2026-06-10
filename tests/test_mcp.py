@@ -189,7 +189,9 @@ async def test_flash_returns_error_when_fqbn_missing(isolated_config):
 async def test_flash_passes_explicit_board_and_port():
     with patch("nff.mcp_server.toolchain.flash", return_value="OK: done") as mock_flash:
         await flash("void setup(){}", board="arduino:avr:uno", port="COM3")
-    mock_flash.assert_called_once_with("void setup(){}", "arduino:avr:uno", "COM3")
+    mock_flash.assert_called_once_with(
+        code="void setup(){}", fqbn="arduino:avr:uno", port="COM3", source=None
+    )
 
 
 async def test_serial_read_returns_captured_text():
@@ -272,7 +274,7 @@ async def test_get_device_info_falls_back_to_config_when_board_unknown(isolated_
 # ===========================================================================
 
 _ALL_TOOL_NAMES = {
-    "list_devices", "flash", "serial_read", "serial_write",
+    "list_devices", "compile", "flash", "serial_read", "serial_write",
     "reset_device", "get_device_info", "wokwi_flash",
     "wokwi_serial_read", "wokwi_get_diagram",
     "authenticate", "complete_authentication",
