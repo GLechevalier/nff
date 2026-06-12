@@ -17,7 +17,7 @@ _SIM_BOARDS = [
 ]
 
 
-def _register_mcp(host: str = "127.0.0.1", port: int = 3000) -> None:
+def _register_mcp(host: str = "127.0.0.1", port: int = 3010) -> None:
     try:
         url = f"http://{host}:{port}/mcp"
         subprocess.run(

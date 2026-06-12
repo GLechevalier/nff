@@ -594,7 +594,7 @@ class _NffASGI:
     """ASGI app: OAuth 2.1 proxy endpoints + Bearer-authenticated /mcp transport."""
 
     def __init__(self, session_manager: StreamableHTTPSessionManager,
-                 host: str = "127.0.0.1", port: int = 3001) -> None:
+                 host: str = "127.0.0.1", port: int = 3010) -> None:
         self._sm = session_manager
         self._base = f"http://{host}:{port}"
 
@@ -776,7 +776,7 @@ class _NffASGI:
             await send({"type": "lifespan.shutdown.complete"})
 
 
-def _make_starlette_app(host: str = "127.0.0.1", port: int = 3001) -> _NffASGI:
+def _make_starlette_app(host: str = "127.0.0.1", port: int = 3010) -> _NffASGI:
     session_manager = StreamableHTTPSessionManager(
         app=app,
         json_response=False,
@@ -785,7 +785,7 @@ def _make_starlette_app(host: str = "127.0.0.1", port: int = 3001) -> _NffASGI:
     return _NffASGI(session_manager, host=host, port=port)
 
 
-async def run_server(host: str = "127.0.0.1", port: int = 3001) -> None:
+async def run_server(host: str = "127.0.0.1", port: int = 3010) -> None:
     asgi_app = _make_starlette_app(host=host, port=port)
     config = uvicorn.Config(asgi_app, host=host, port=port, log_level="warning")
     server = uvicorn.Server(config)
