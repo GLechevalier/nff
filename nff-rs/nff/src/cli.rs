@@ -26,6 +26,7 @@ pub enum Commands {
     Auth(AuthCommand),
     Repair(RepairArgs),
     Provision(ProvisionCommand),
+    Agent(AgentArgs),
 }
 
 #[derive(Args)]
@@ -186,6 +187,22 @@ pub struct BatchArgs {
     pub fleet_url: Option<String>,
     #[arg(long, value_name = "SECRET", help = "X-Fleet-Secret (or env NFF_FLEET_SECRET).")]
     pub secret: Option<String>,
+}
+
+// ── agent ─────────────────────────────────────────────────────────────────
+
+#[derive(Args)]
+pub struct AgentArgs {
+    #[arg(value_name = "PROMPT", help = "What you want the cloud agent to do.")]
+    pub prompt: String,
+    #[arg(long, value_name = "UUID", help = "Project id override (default: resolved from your login).")]
+    pub project: Option<String>,
+    #[arg(long = "agent-url", value_name = "URL", help = "Cloud agent base URL. Defaults to config agent.server_url.")]
+    pub agent_url: Option<String>,
+    #[arg(long = "mcp-url", value_name = "URL", help = "This bench's local nff MCP URL the agent calls back into.")]
+    pub mcp_url: Option<String>,
+    #[arg(long = "no-stream", help = "Suppress live output; print only the final reply.")]
+    pub no_stream: bool,
 }
 
 #[derive(Args)]

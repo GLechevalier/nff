@@ -36,6 +36,7 @@ fn main() {
         Commands::Provision(p) => match p.sub {
             ProvisionSubcommands::Batch(args) => commands::provision::run_batch(&args),
         },
+        Commands::Agent(args) => commands::agent::run(&args),
     };
 
     if let Err(e) = result {

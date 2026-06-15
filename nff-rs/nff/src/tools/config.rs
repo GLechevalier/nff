@@ -24,6 +24,8 @@ pub struct Config {
     pub diagnosis: DiagnosisConfig,
     #[serde(default)]
     pub mcp: McpConfig,
+    #[serde(default)]
+    pub agent: AgentConfig,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -95,6 +97,39 @@ pub struct McpConfig {
     pub refresh_token: Option<String>,
 }
 
+fn default_agent_server_url() -> String {
+    "https://agent.nanoforgeflow.com".into()
+}
+
+fn default_local_mcp_url() -> String {
+    "http://127.0.0.1:3010/mcp".into()
+}
+
+/// Cloud-agent pairing config (`nff agent`). `server_url` = the deployed
+/// nff-agent-worker HTTP endpoint; `local_mcp_url` = THIS bench's `nff mcp` (so the
+/// cloud agent can reach the connected hardware); `project_id` is optional (the
+/// worker resolves it from the diagnosis JWT when unset). Auth reuses the diagnosis
+/// tokens, so no tokens live here.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct AgentConfig {
+    #[serde(default = "default_agent_server_url")]
+    pub server_url: String,
+    #[serde(default = "default_local_mcp_url")]
+    pub local_mcp_url: String,
+    #[serde(default)]
+    pub project_id: Option<String>,
+}
+
+impl Default for AgentConfig {
+    fn default() -> Self {
+        AgentConfig {
+            server_url: default_agent_server_url(),
+            local_mcp_url: default_local_mcp_url(),
+            project_id: None,
+        }
+    }
+}
+
 impl Default for WokwiConfig {
     fn default() -> Self {
         WokwiConfig {
@@ -113,6 +148,7 @@ impl Default for Config {
             wokwi: WokwiConfig::default(),
             diagnosis: DiagnosisConfig::default(),
             mcp: McpConfig::default(),
+            agent: AgentConfig::default(),
         }
     }
 }
