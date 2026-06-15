@@ -16,6 +16,11 @@ _DEFAULT = {
     # Opaque tokens the local MCP OAuth proxy issues to Claude Code. Decoupled from
     # the diagnosis (Supabase) JWT so the MCP session does not expire with it.
     "mcp": {"access_token": None, "refresh_token": None},
+    # Cloud agent pairing (`nff agent`). server_url = the deployed nff-agent-worker
+    # HTTP endpoint; local_mcp_url = THIS bench's `nff mcp` (so the cloud agent can
+    # reach the connected hardware); project_id is optional (the worker resolves it
+    # from the diagnosis JWT when unset). Auth reuses the diagnosis tokens.
+    "agent": {"server_url": "https://agent.nanoforgeflow.com", "local_mcp_url": "http://127.0.0.1:3010/mcp", "project_id": None},
 }
 
 
@@ -145,4 +150,36 @@ def set_diagnosis_server_url(url: str) -> None:
     data = load() if exists() else copy.deepcopy(_DEFAULT)
     data.setdefault("diagnosis", copy.deepcopy(_DEFAULT["diagnosis"]))
     data["diagnosis"]["server_url"] = url
+    save(data)
+
+
+def get_agent_config() -> dict:
+    """Cloud-agent pairing config, merged over defaults so older config files
+    (written before this section existed) still return every key."""
+    try:
+        cfg = copy.deepcopy(_DEFAULT["agent"])
+        cfg.update(load().get("agent", {}))
+        return cfg
+    except ConfigError:
+        return copy.deepcopy(_DEFAULT["agent"])
+
+
+def set_agent_server_url(url: str) -> None:
+    data = load() if exists() else copy.deepcopy(_DEFAULT)
+    data.setdefault("agent", copy.deepcopy(_DEFAULT["agent"]))
+    data["agent"]["server_url"] = url
+    save(data)
+
+
+def set_agent_local_mcp_url(url: str) -> None:
+    data = load() if exists() else copy.deepcopy(_DEFAULT)
+    data.setdefault("agent", copy.deepcopy(_DEFAULT["agent"]))
+    data["agent"]["local_mcp_url"] = url
+    save(data)
+
+
+def set_agent_project_id(project_id) -> None:
+    data = load() if exists() else copy.deepcopy(_DEFAULT)
+    data.setdefault("agent", copy.deepcopy(_DEFAULT["agent"]))
+    data["agent"]["project_id"] = project_id
     save(data)

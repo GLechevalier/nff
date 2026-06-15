@@ -3,6 +3,7 @@
 import click
 
 from nff import __version__
+from nff.commands.agent_cmd import agent
 from nff.commands.auth_cmd import auth_cli
 from nff.commands.clean import clean
 from nff.commands.compile_cmd import compile_cmd
@@ -39,3 +40,4 @@ cli.add_command(mcp)
 cli.add_command(auth_cli, name="auth")
 cli.add_command(wokwi_cli, name="wokwi")
 cli.add_command(repair)
+cli.add_command(agent)
