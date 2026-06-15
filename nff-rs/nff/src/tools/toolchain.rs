@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -11,6 +12,8 @@ pub enum ToolchainError {
     #[error("Command timed out: {0}")]
     #[allow(dead_code)]
     Timeout(String),
+    #[error("{0}")]
+    Invalid(String),
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -309,13 +312,22 @@ pub fn stream_upload(sketch_dir: &Path, fqbn: &str, port: &str) -> Result<Proces
     ]))
 }
 
+/// Compile + upload from raw code. Retained as a thin shim over `flash_sketch`
+/// for API parity with the Python `toolchain.flash`; the MCP tool uses
+/// `flash_sketch` directly so it can also take a sketch path.
+#[allow(dead_code)]
 pub fn flash(code: &str, fqbn: &str, port: &str) -> String {
     let target_dir = match write_sketch(code, None) {
         Ok(d) => d,
         Err(e) => return format!("ERROR: Could not write sketch: {e}"),
     };
+    flash_sketch(&target_dir, fqbn, port)
+}
 
-    let compile_result = match compile_sketch(&target_dir, fqbn) {
+/// Compile then upload an already-resolved sketch directory. Used by the `flash`
+/// MCP tool so it can accept a sketch path, not just raw code.
+pub fn flash_sketch(target_dir: &Path, fqbn: &str, port: &str) -> String {
+    let compile_result = match compile_sketch(target_dir, fqbn) {
         Ok(r) => r,
         Err(e) => return format!("ERROR: {e}"),
     };
@@ -328,7 +340,7 @@ pub fn flash(code: &str, fqbn: &str, port: &str) -> String {
         );
     }
 
-    let upload_result = match upload_sketch(&target_dir, fqbn, port) {
+    let upload_result = match upload_sketch(target_dir, fqbn, port) {
         Ok(r) => r,
         Err(e) => return format!("ERROR: {e}"),
     };
@@ -347,6 +359,223 @@ pub fn flash(code: &str, fqbn: &str, port: &str) -> String {
     let uo = upload_result.output();
     if !uo.is_empty() { sections.push(format!("--- upload ---\n{uo}")); }
     sections.join("\n")
+}
+
+// ---------------------------------------------------------------------------
+// Port-free structured compile (mirrors Python toolchain.compile_only)
+// ---------------------------------------------------------------------------
+
+/// Build directory arduino-cli writes into: `<sketch>/build/<fqbn-with-dots>`.
+fn build_dir(sketch_dir: &Path, fqbn: &str) -> PathBuf {
+    sketch_dir.join("build").join(fqbn.replace(':', "."))
+}
+
+/// kind → filename suffix, in flash-priority order for the `image` pick.
+const ARTIFACT_SUFFIXES: &[(&str, &str)] = &[
+    ("elf", ".ino.elf"),
+    ("merged_bin", ".ino.merged.bin"),
+    ("bin", ".ino.bin"),
+    ("hex", ".ino.hex"),
+    ("partitions_bin", ".ino.partitions.bin"),
+    ("bootloader_bin", ".ino.bootloader.bin"),
+];
+
+/// Structured result of a compile-only run — never uploads. Mirrors the Python
+/// `CompileResult.to_dict()` shape consumed by the `compile` MCP tool.
+pub struct CompileResult {
+    pub ok: bool,
+    pub fqbn: String,
+    #[allow(dead_code)]
+    pub sketch_dir: PathBuf,
+    #[allow(dead_code)]
+    pub returncode: i32,
+    pub output: String,
+    pub artifacts: BTreeMap<String, PathBuf>,
+}
+
+impl CompileResult {
+    pub fn elf(&self) -> Option<&PathBuf> {
+        self.artifacts.get("elf")
+    }
+
+    /// Best image to flash, preferring a merged binary over a bare bin/hex.
+    pub fn image(&self) -> Option<&PathBuf> {
+        ["merged_bin", "bin", "hex"]
+            .iter()
+            .find_map(|k| self.artifacts.get(*k))
+    }
+
+    pub fn errors(&self) -> Vec<String> {
+        self.output
+            .lines()
+            .filter(|l| l.contains("error:"))
+            .map(|l| l.to_string())
+            .collect()
+    }
+
+    pub fn to_json(&self) -> serde_json::Value {
+        let artifacts: serde_json::Map<String, serde_json::Value> = self
+            .artifacts
+            .iter()
+            .map(|(k, v)| (k.clone(), serde_json::Value::String(v.display().to_string())))
+            .collect();
+        serde_json::json!({
+            "ok": self.ok,
+            "fqbn": self.fqbn,
+            "elf": self.elf().map(|p| p.display().to_string()),
+            "image": self.image().map(|p| p.display().to_string()),
+            "artifacts": artifacts,
+            "errors": self.errors(),
+            "output": self.output,
+        })
+    }
+}
+
+/// First file under `root` whose name ends with `ext` (recursive; rglob fallback).
+fn find_by_ext(root: &Path, ext: &str) -> Option<PathBuf> {
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(|n| n.ends_with(ext))
+                .unwrap_or(false)
+            {
+                return Some(path);
+            }
+        }
+    }
+    None
+}
+
+/// Map artifact kind → absolute path for whatever the compile produced. Looks at
+/// the deterministic build dir first, then falls back to a recursive scan so a
+/// stray build layout still resolves instead of returning nothing.
+pub fn discover_artifacts(sketch_dir: &Path, fqbn: &str) -> BTreeMap<String, PathBuf> {
+    let bdir = build_dir(sketch_dir, fqbn);
+    let name = sketch_dir.file_name().unwrap_or_default().to_string_lossy().into_owned();
+    let mut found: BTreeMap<String, PathBuf> = BTreeMap::new();
+    for (kind, suffix) in ARTIFACT_SUFFIXES {
+        let candidate = bdir.join(format!("{name}{suffix}"));
+        if candidate.is_file() {
+            found.insert((*kind).to_string(), candidate);
+        }
+    }
+    if !found.contains_key("elf") {
+        if let Some(p) = find_by_ext(sketch_dir, ".elf") {
+            found.insert("elf".into(), p);
+        }
+    }
+    if !found.contains_key("merged_bin")
+        && !found.contains_key("bin")
+        && !found.contains_key("hex")
+    {
+        for (ext, kind) in [(".merged.bin", "merged_bin"), (".bin", "bin"), (".hex", "hex")] {
+            if let Some(p) = find_by_ext(sketch_dir, ext) {
+                found.insert(kind.into(), p);
+                break;
+            }
+        }
+    }
+    found
+}
+
+/// Normalize raw code, a `.ino` file, or a sketch folder into a sketch directory
+/// arduino-cli will accept (folder name must match the `.ino` stem).
+pub fn resolve_sketch_dir(
+    code: Option<&str>,
+    source: Option<&Path>,
+) -> Result<PathBuf, ToolchainError> {
+    if let Some(src) = source {
+        if src.is_dir() {
+            return Ok(src.to_path_buf());
+        }
+        if src.is_file() && src.extension().and_then(|e| e.to_str()) == Some("ino") {
+            let stem = src.file_stem().and_then(|s| s.to_str()).unwrap_or_default();
+            let parent_name = src
+                .parent()
+                .and_then(|p| p.file_name())
+                .and_then(|n| n.to_str())
+                .unwrap_or_default();
+            if parent_name == stem {
+                return Ok(src.parent().unwrap().to_path_buf());
+            }
+            // Loose .ino: copy into a properly-named sketch folder under temp.
+            let dest = std::env::temp_dir().join(format!("nff_sketch_{stem}"));
+            std::fs::create_dir_all(&dest)?;
+            let contents = std::fs::read_to_string(src)?;
+            std::fs::write(dest.join(format!("{stem}.ino")), contents)?;
+            return Ok(dest);
+        }
+        return Err(ToolchainError::Invalid(format!(
+            "Not a sketch file or directory: {}",
+            src.display()
+        )));
+    }
+    if let Some(code) = code {
+        return write_sketch(code, None);
+    }
+    Err(ToolchainError::Invalid(
+        "provide either code or a .ino file / sketch folder".into(),
+    ))
+}
+
+/// Compile into the deterministic `--build-path` so artifacts are always present
+/// (unlike `--output-dir`, which arduino-cli only populates on a cache miss).
+fn compile_to_build_path(sketch_dir: &Path, fqbn: &str) -> Result<RunResult, ToolchainError> {
+    let exe = require_arduino_cli()?;
+    let bdir = build_dir(sketch_dir, fqbn);
+    std::fs::create_dir_all(&bdir)?;
+    let build_prop = fqbn_build_property(fqbn);
+    let cmd_strs = [
+        exe.to_str().unwrap_or("arduino-cli"),
+        "compile",
+        "--fqbn", fqbn,
+        "--build-property", &build_prop,
+        "--build-path", bdir.to_str().unwrap_or(""),
+        sketch_dir.to_str().unwrap_or(""),
+    ];
+    run(&cmd_strs)
+}
+
+/// Compile a sketch and report exactly what came out — never uploads. Accepts a
+/// `.ino` file, a sketch folder (`source`) or raw `code`. Only arduino-cli /
+/// sketch-resolution problems raise; callers branch on `.ok`.
+pub fn compile_only(
+    fqbn: &str,
+    code: Option<&str>,
+    source: Option<&Path>,
+) -> Result<CompileResult, ToolchainError> {
+    if fqbn.is_empty() {
+        return Err(ToolchainError::Invalid(
+            "Missing board FQBN — pass board=/--board or run `nff init`".into(),
+        ));
+    }
+    if find_arduino_cli().is_none() {
+        return Err(ToolchainError::NotFound(
+            "arduino-cli not found — run `nff install-deps`".into(),
+        ));
+    }
+    let sd = resolve_sketch_dir(code, source)?;
+    let result = compile_to_build_path(&sd, fqbn)?;
+    let artifacts = if result.success {
+        discover_artifacts(&sd, fqbn)
+    } else {
+        BTreeMap::new()
+    };
+    Ok(CompileResult {
+        ok: result.success,
+        fqbn: fqbn.to_string(),
+        sketch_dir: sd,
+        returncode: result.returncode,
+        output: result.output(),
+        artifacts,
+    })
 }
 
 #[cfg(test)]
@@ -407,6 +636,61 @@ mod tests {
     #[test]
     fn find_wokwi_cli_does_not_panic() {
         let _ = find_wokwi_cli();
+    }
+
+    #[test]
+    fn resolve_sketch_dir_passes_through_folder() {
+        let dir = std::env::temp_dir().join(format!("nff_rsd_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let resolved = resolve_sketch_dir(None, Some(&dir)).unwrap();
+        assert_eq!(resolved, dir);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn resolve_sketch_dir_writes_code() {
+        let resolved = resolve_sketch_dir(Some("void setup(){} void loop(){}"), None).unwrap();
+        let ino = resolved.join(format!(
+            "{}.ino",
+            resolved.file_name().unwrap().to_string_lossy()
+        ));
+        assert!(ino.exists());
+    }
+
+    #[test]
+    fn resolve_sketch_dir_requires_input() {
+        assert!(resolve_sketch_dir(None, None).is_err());
+    }
+
+    #[test]
+    fn compile_result_image_prefers_merged_bin() {
+        let mut artifacts = BTreeMap::new();
+        artifacts.insert("bin".to_string(), PathBuf::from("/x/a.ino.bin"));
+        artifacts.insert("merged_bin".to_string(), PathBuf::from("/x/a.ino.merged.bin"));
+        let r = CompileResult {
+            ok: true,
+            fqbn: "esp32:esp32:esp32".into(),
+            sketch_dir: PathBuf::from("/x"),
+            returncode: 0,
+            output: String::new(),
+            artifacts,
+        };
+        assert_eq!(r.image().unwrap(), &PathBuf::from("/x/a.ino.merged.bin"));
+    }
+
+    #[test]
+    fn compile_result_errors_filters_error_lines() {
+        let r = CompileResult {
+            ok: false,
+            fqbn: "arduino:avr:uno".into(),
+            sketch_dir: PathBuf::from("/x"),
+            returncode: 1,
+            output: "blink.ino:3:1: error: expected ';'\nnote: something".into(),
+            artifacts: BTreeMap::new(),
+        };
+        let errs = r.errors();
+        assert_eq!(errs.len(), 1);
+        assert!(errs[0].contains("error:"));
     }
 
     #[test]

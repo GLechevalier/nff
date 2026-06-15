@@ -4,13 +4,14 @@ mod mcp_server;
 mod tools;
 
 use clap::Parser;
-use cli::{AuthSubcommands, Cli, Commands, WokwiSubcommands};
+use cli::{AuthSubcommands, Cli, Commands, ProvisionSubcommands, WokwiSubcommands};
 
 fn main() {
     let cli = Cli::parse();
 
     let result = match cli.command {
         Commands::Init(args)        => commands::init::run(&args),
+        Commands::Compile(args)     => commands::compile::run(&args),
         Commands::Flash(args)       => commands::flash::run(&args),
         Commands::Monitor(args)     => commands::monitor::run(&args),
         Commands::Doctor            => commands::doctor::run(),
@@ -32,6 +33,9 @@ fn main() {
             AuthSubcommands::Status       => commands::auth::run_status(),
         },
         Commands::Repair(args) => commands::repair::run(&args),
+        Commands::Provision(p) => match p.sub {
+            ProvisionSubcommands::Batch(args) => commands::provision::run_batch(&args),
+        },
     };
 
     if let Err(e) = result {

@@ -66,6 +66,7 @@ def logout(server):
         except Exception:
             pass
     config.clear_diagnosis_tokens()
+    config.clear_mcp_tokens()
     click.echo("OK: logged out")
 
 

@@ -13,6 +13,9 @@ _DEFAULT = {
     "default_device": {"port": None, "board": None, "fqbn": None, "baud": 9600},
     "wokwi": {"api_token": None, "default_timeout_ms": 5000, "diagram_path": None},
     "diagnosis": {"server_url": "https://nanoforgeflow.com", "frontend_url": "https://nanoforgeflow.com", "access_token": None, "refresh_token": None},
+    # Opaque tokens the local MCP OAuth proxy issues to Claude Code. Decoupled from
+    # the diagnosis (Supabase) JWT so the MCP session does not expire with it.
+    "mcp": {"access_token": None, "refresh_token": None},
 }
 
 
@@ -112,6 +115,29 @@ def clear_diagnosis_tokens() -> None:
     data.setdefault("diagnosis", copy.deepcopy(_DEFAULT["diagnosis"]))
     data["diagnosis"]["access_token"] = None
     data["diagnosis"]["refresh_token"] = None
+    save(data)
+
+
+def get_mcp_tokens() -> dict:
+    try:
+        return load().get("mcp", copy.deepcopy(_DEFAULT["mcp"]))
+    except ConfigError:
+        return copy.deepcopy(_DEFAULT["mcp"])
+
+
+def set_mcp_tokens(access: str, refresh: str) -> None:
+    data = load() if exists() else copy.deepcopy(_DEFAULT)
+    data.setdefault("mcp", copy.deepcopy(_DEFAULT["mcp"]))
+    data["mcp"]["access_token"] = access
+    data["mcp"]["refresh_token"] = refresh
+    save(data)
+
+
+def clear_mcp_tokens() -> None:
+    data = load() if exists() else copy.deepcopy(_DEFAULT)
+    data.setdefault("mcp", copy.deepcopy(_DEFAULT["mcp"]))
+    data["mcp"]["access_token"] = None
+    data["mcp"]["refresh_token"] = None
     save(data)
 
 

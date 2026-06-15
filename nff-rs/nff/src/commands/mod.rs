@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod clean;
+pub mod compile;
 pub mod connect;
 pub mod doctor;
 pub mod flash;
@@ -8,5 +9,6 @@ pub mod install_deps;
 pub mod mcp;
 pub mod monitor;
 pub mod ota;
+pub mod provision;
 pub mod repair;
 pub mod wokwi;

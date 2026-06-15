@@ -438,6 +438,82 @@ async def test_oauth_token_invalid_code(base_url):
     assert resp.status_code == 400
 
 
+async def test_oauth_metadata_advertises_refresh_grant(base_url):
+    """Auth-server metadata must advertise refresh_token so Claude refreshes silently."""
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(f"{base_url}/.well-known/oauth-authorization-server")
+    assert resp.status_code == 200
+    assert "refresh_token" in resp.json()["grant_types_supported"]
+
+
+async def test_oauth_token_exchange_issues_refresh_token(base_url, isolated_config):
+    """authorization_code exchange returns a refresh_token + long-lived expiry.
+
+    Regression guard: without a refresh_token the MCP session died with the
+    upstream Supabase JWT (~15 min), forcing re-auth.
+    """
+    from nff.mcp_server import _auth_codes, _MCP_TOKEN_TTL
+    from nff import config as cfg
+    cfg.set_mcp_tokens("nff_at_x", "nff_rt_y")
+    _auth_codes["code1"] = "nff_at_x"
+
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            f"{base_url}/oauth/token",
+            content="grant_type=authorization_code&code=code1",
+            headers={"content-type": "application/x-www-form-urlencoded"},
+        )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["access_token"] == "nff_at_x"
+    assert data["refresh_token"] == "nff_rt_y"
+    assert data["expires_in"] == _MCP_TOKEN_TTL
+
+
+async def test_oauth_refresh_token_grant_rotates(base_url, isolated_config):
+    """refresh_token grant mints a fresh access+refresh pair (silent re-auth)."""
+    from nff import config as cfg
+    cfg.set_mcp_tokens("nff_at_old", "nff_rt_old")
+
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            f"{base_url}/oauth/token",
+            content="grant_type=refresh_token&refresh_token=nff_rt_old",
+            headers={"content-type": "application/x-www-form-urlencoded"},
+        )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["access_token"] != "nff_at_old"      # rotated
+    assert data["refresh_token"] != "nff_rt_old"     # rotated
+    # config now holds the new pair, which is what /mcp validates against
+    assert cfg.get_mcp_tokens()["access_token"] == data["access_token"]
+    assert cfg.get_mcp_tokens()["refresh_token"] == data["refresh_token"]
+
+
+async def test_oauth_refresh_token_grant_rejects_stale(base_url, isolated_config):
+    """A refresh_token that doesn't match the stored one is rejected."""
+    from nff import config as cfg
+    cfg.set_mcp_tokens("nff_at_cur", "nff_rt_cur")
+
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            f"{base_url}/oauth/token",
+            content="grant_type=refresh_token&refresh_token=nff_rt_stale",
+            headers={"content-type": "application/x-www-form-urlencoded"},
+        )
+    assert resp.status_code == 400
+
+
+async def test_mcp_transport_accepts_opaque_mcp_token(mcp_url):
+    """A bearer matching the stored opaque MCP access token is accepted at /mcp."""
+    from nff import config as cfg
+    cfg.set_mcp_tokens("nff_at_live", "nff_rt_live")
+    async with _authed_mcp_client(mcp_url, token="nff_at_live") as (read, write, _):
+        async with ClientSession(read, write) as session:
+            result = await session.initialize()
+    assert result is not None
+
+
 # ---------------------------------------------------------------------------
 # MCP tool calls — require valid Bearer token
 # ---------------------------------------------------------------------------

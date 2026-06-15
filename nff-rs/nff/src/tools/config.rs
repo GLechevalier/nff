@@ -22,6 +22,8 @@ pub struct Config {
     pub wokwi: WokwiConfig,
     #[serde(default)]
     pub diagnosis: DiagnosisConfig,
+    #[serde(default)]
+    pub mcp: McpConfig,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -68,6 +70,8 @@ fn default_server_url() -> String {
 pub struct DiagnosisConfig {
     #[serde(default = "default_server_url")]
     pub server_url: String,
+    #[serde(default = "default_server_url")]
+    pub frontend_url: String,
     pub access_token: Option<String>,
     pub refresh_token: Option<String>,
 }
@@ -76,10 +80,19 @@ impl Default for DiagnosisConfig {
     fn default() -> Self {
         DiagnosisConfig {
             server_url: default_server_url(),
+            frontend_url: default_server_url(),
             access_token: None,
             refresh_token: None,
         }
     }
+}
+
+/// Opaque tokens the local MCP OAuth proxy issues to Claude Code. Decoupled from
+/// the diagnosis (Supabase) JWT so the MCP session does not expire with it.
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct McpConfig {
+    pub access_token: Option<String>,
+    pub refresh_token: Option<String>,
 }
 
 impl Default for WokwiConfig {
@@ -99,6 +112,7 @@ impl Default for Config {
             default_device: DeviceConfig::default(),
             wokwi: WokwiConfig::default(),
             diagnosis: DiagnosisConfig::default(),
+            mcp: McpConfig::default(),
         }
     }
 }
@@ -201,6 +215,24 @@ pub fn clear_diagnosis_tokens() -> Result<(), ConfigError> {
 pub fn set_diagnosis_server_url(url: &str) -> Result<(), ConfigError> {
     let mut config = load()?;
     config.diagnosis.server_url = url.into();
+    save(&config)
+}
+
+pub fn get_mcp_tokens() -> Result<McpConfig, ConfigError> {
+    Ok(load()?.mcp)
+}
+
+pub fn set_mcp_tokens(access: &str, refresh: &str) -> Result<(), ConfigError> {
+    let mut config = load()?;
+    config.mcp.access_token = Some(access.into());
+    config.mcp.refresh_token = Some(refresh.into());
+    save(&config)
+}
+
+pub fn clear_mcp_tokens() -> Result<(), ConfigError> {
+    let mut config = load()?;
+    config.mcp.access_token = None;
+    config.mcp.refresh_token = None;
     save(&config)
 }
 

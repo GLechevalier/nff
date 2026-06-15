@@ -1362,6 +1362,8 @@ dependencies = [
  "console",
  "dirs",
  "flate2",
+ "form_urlencoded",
+ "getrandom 0.3.4",
  "indicatif",
  "reqwest",
  "rmcp",

@@ -323,6 +323,7 @@ async def auth_logout() -> str:
             pass
     try:
         config.clear_diagnosis_tokens()
+        config.clear_mcp_tokens()
     except Exception as exc:
         return f"ERROR: {exc}"
     return "OK: logged out"
@@ -341,6 +342,7 @@ async def auth_status() -> str:
 async def auth_clear() -> str:
     try:
         config.clear_diagnosis_tokens()
+        config.clear_mcp_tokens()
     except Exception as exc:
         return f"ERROR: {exc}"
     return "OK: tokens cleared"
@@ -558,8 +560,27 @@ _DISPATCH = {
 
 # In-memory OAuth state (ephemeral — cleared on server restart, which forces a new login)
 _oauth_sessions: dict[str, dict] = {}  # session_id → {redirect_uri, state}
-_auth_codes: dict[str, str] = {}       # auth_code → access_token
+_auth_codes: dict[str, str] = {}       # auth_code → mcp access token
 _pending_browser_auth: dict = {}       # at most one pending browser-login session
+
+# Lifetime of the opaque MCP access token handed to Claude Code. The proxy issues a
+# refresh token alongside it, so Claude refreshes silently — this only governs how
+# often that silent refresh happens, never a user-facing prompt. Decoupled from the
+# upstream Supabase JWT's (short) expiry, which is what caused re-auth every ~15 min.
+_MCP_TOKEN_TTL = 86400  # 24h
+
+
+def _mint_mcp_session() -> str:
+    """Create and persist a fresh opaque MCP access+refresh token pair.
+
+    Returns the new access token. The matching refresh token is read back from
+    config at token-exchange time. Minting rotates both tokens, so any previously
+    issued pair is invalidated.
+    """
+    access = "nff_at_" + secrets.token_urlsafe(32)
+    refresh = "nff_rt_" + secrets.token_urlsafe(32)
+    config.set_mcp_tokens(access, refresh)
+    return access
 
 
 async def _read_body(receive: Receive) -> bytes:
@@ -608,8 +629,13 @@ class _NffASGI:
             elif path == "/mcp" or path.startswith("/mcp/"):
                 headers_dict = dict(scope.get("headers", []))
                 auth = headers_dict.get(b"authorization", b"").decode()
-                stored = config.get_diagnosis_config().get("access_token")
-                if not stored or auth != f"Bearer {stored}":
+                presented = auth[len("Bearer "):] if auth.startswith("Bearer ") else ""
+                mcp_token = config.get_mcp_tokens().get("access_token")
+                # Legacy: sessions authorized before opaque tokens existed still hold
+                # the raw Supabase JWT. Accept it once so the live session isn't broken;
+                # Claude re-authorizes on its next expiry and upgrades to an MCP token.
+                legacy_token = config.get_diagnosis_config().get("access_token")
+                if not presented or presented not in (mcp_token, legacy_token):
                     await self._send_401(send)
                     return
                 await self._sm.handle_request(scope, receive, send)
@@ -673,7 +699,7 @@ class _NffASGI:
                 "token_endpoint": f"{self._base}/oauth/token",
                 "registration_endpoint": f"{self._base}/oauth/register",
                 "response_types_supported": ["code"],
-                "grant_types_supported": ["authorization_code"],
+                "grant_types_supported": ["authorization_code", "refresh_token"],
                 "code_challenge_methods_supported": ["S256"],
             })
 
@@ -682,7 +708,7 @@ class _NffASGI:
                 "client_id": "nff-mcp",
                 "client_secret": "unused",
                 "redirect_uris": [],
-                "grant_types": ["authorization_code"],
+                "grant_types": ["authorization_code", "refresh_token"],
                 "response_types": ["code"],
                 "token_endpoint_auth_method": "none",
             })
@@ -699,7 +725,7 @@ class _NffASGI:
             existing_token = cfg.get("access_token")
             if existing_token:
                 auth_code = secrets.token_urlsafe(32)
-                _auth_codes[auth_code] = existing_token
+                _auth_codes[auth_code] = _mint_mcp_session()
                 sep = "&" if "?" in redirect_uri else "?"
                 await self._send_redirect(send, f"{redirect_uri}{sep}code={auth_code}&state={state}")
                 return
@@ -739,7 +765,7 @@ class _NffASGI:
                 )
                 return
             auth_code = secrets.token_urlsafe(32)
-            _auth_codes[auth_code] = access_token
+            _auth_codes[auth_code] = _mint_mcp_session()
             sep = "&" if "?" in session["redirect_uri"] else "?"
             location = (
                 f"{session['redirect_uri']}{sep}"
@@ -754,15 +780,36 @@ class _NffASGI:
             def tp(key: str) -> str | None:
                 return token_params.get(key, [None])[0]
 
+            grant_type = tp("grant_type")
+
+            if grant_type == "refresh_token":
+                presented = tp("refresh_token")
+                stored = config.get_mcp_tokens().get("refresh_token")
+                if not presented or not stored or presented != stored:
+                    await self._send_json(send, 400, {"error": "invalid_grant"})
+                    return
+                # Rotate: mint a fresh access+refresh pair, invalidating the old one.
+                access_token = _mint_mcp_session()
+                refresh_token = config.get_mcp_tokens().get("refresh_token") or ""
+                await self._send_json(send, 200, {
+                    "access_token": access_token,
+                    "refresh_token": refresh_token,
+                    "token_type": "bearer",
+                    "expires_in": _MCP_TOKEN_TTL,
+                })
+                return
+
             code = tp("code")
             if not code or code not in _auth_codes:
                 await self._send_json(send, 400, {"error": "invalid_grant"})
                 return
             access_token = _auth_codes.pop(code)
+            refresh_token = config.get_mcp_tokens().get("refresh_token") or ""
             await self._send_json(send, 200, {
                 "access_token": access_token,
+                "refresh_token": refresh_token,
                 "token_type": "bearer",
-                "expires_in": 3600,
+                "expires_in": _MCP_TOKEN_TTL,
             })
 
         else:
