@@ -20,6 +20,12 @@ pub struct Config {
     pub version: String,
     pub default_device: DeviceConfig,
     pub wokwi: WokwiConfig,
+    #[serde(default)]
+    pub diagnosis: DiagnosisConfig,
+    #[serde(default)]
+    pub mcp: McpConfig,
+    #[serde(default)]
+    pub agent: AgentConfig,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -58,6 +64,72 @@ fn default_timeout_ms() -> u32 {
     5000
 }
 
+fn default_server_url() -> String {
+    "https://nanoforgeflow.com".into()
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct DiagnosisConfig {
+    #[serde(default = "default_server_url")]
+    pub server_url: String,
+    #[serde(default = "default_server_url")]
+    pub frontend_url: String,
+    pub access_token: Option<String>,
+    pub refresh_token: Option<String>,
+}
+
+impl Default for DiagnosisConfig {
+    fn default() -> Self {
+        DiagnosisConfig {
+            server_url: default_server_url(),
+            frontend_url: default_server_url(),
+            access_token: None,
+            refresh_token: None,
+        }
+    }
+}
+
+/// Opaque tokens the local MCP OAuth proxy issues to Claude Code. Decoupled from
+/// the diagnosis (Supabase) JWT so the MCP session does not expire with it.
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct McpConfig {
+    pub access_token: Option<String>,
+    pub refresh_token: Option<String>,
+}
+
+fn default_agent_server_url() -> String {
+    "https://agent.nanoforgeflow.com".into()
+}
+
+fn default_local_mcp_url() -> String {
+    "http://127.0.0.1:3010/mcp".into()
+}
+
+/// Cloud-agent pairing config (`nff agent`). `server_url` = the deployed
+/// nff-agent-worker HTTP endpoint; `local_mcp_url` = THIS bench's `nff mcp` (so the
+/// cloud agent can reach the connected hardware); `project_id` is optional (the
+/// worker resolves it from the diagnosis JWT when unset). Auth reuses the diagnosis
+/// tokens, so no tokens live here.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct AgentConfig {
+    #[serde(default = "default_agent_server_url")]
+    pub server_url: String,
+    #[serde(default = "default_local_mcp_url")]
+    pub local_mcp_url: String,
+    #[serde(default)]
+    pub project_id: Option<String>,
+}
+
+impl Default for AgentConfig {
+    fn default() -> Self {
+        AgentConfig {
+            server_url: default_agent_server_url(),
+            local_mcp_url: default_local_mcp_url(),
+            project_id: None,
+        }
+    }
+}
+
 impl Default for WokwiConfig {
     fn default() -> Self {
         WokwiConfig {
@@ -74,6 +146,9 @@ impl Default for Config {
             version: "1".into(),
             default_device: DeviceConfig::default(),
             wokwi: WokwiConfig::default(),
+            diagnosis: DiagnosisConfig::default(),
+            mcp: McpConfig::default(),
+            agent: AgentConfig::default(),
         }
     }
 }
@@ -150,6 +225,50 @@ pub fn set_wokwi_diagram_path(path: Option<&str>) -> Result<(), ConfigError> {
 pub fn set_wokwi_timeout(ms: u32) -> Result<(), ConfigError> {
     let mut config = load()?;
     config.wokwi.default_timeout_ms = ms;
+    save(&config)
+}
+
+#[allow(dead_code)]
+pub fn get_diagnosis_config() -> Result<DiagnosisConfig, ConfigError> {
+    Ok(load()?.diagnosis)
+}
+
+pub fn set_diagnosis_tokens(access: &str, refresh: &str) -> Result<(), ConfigError> {
+    let mut config = load()?;
+    config.diagnosis.access_token = Some(access.into());
+    config.diagnosis.refresh_token = Some(refresh.into());
+    save(&config)
+}
+
+pub fn clear_diagnosis_tokens() -> Result<(), ConfigError> {
+    let mut config = load()?;
+    config.diagnosis.access_token = None;
+    config.diagnosis.refresh_token = None;
+    save(&config)
+}
+
+#[allow(dead_code)]
+pub fn set_diagnosis_server_url(url: &str) -> Result<(), ConfigError> {
+    let mut config = load()?;
+    config.diagnosis.server_url = url.into();
+    save(&config)
+}
+
+pub fn get_mcp_tokens() -> Result<McpConfig, ConfigError> {
+    Ok(load()?.mcp)
+}
+
+pub fn set_mcp_tokens(access: &str, refresh: &str) -> Result<(), ConfigError> {
+    let mut config = load()?;
+    config.mcp.access_token = Some(access.into());
+    config.mcp.refresh_token = Some(refresh.into());
+    save(&config)
+}
+
+pub fn clear_mcp_tokens() -> Result<(), ConfigError> {
+    let mut config = load()?;
+    config.mcp.access_token = None;
+    config.mcp.refresh_token = None;
     save(&config)
 }
 

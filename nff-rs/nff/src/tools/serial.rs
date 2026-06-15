@@ -225,7 +225,7 @@ impl Iterator for LineIter {
             if let Some(pos) = self.buf.iter().position(|&b| b == b'\n') {
                 let raw: Vec<u8> = self.buf.drain(..=pos).collect();
                 let line = String::from_utf8_lossy(&raw)
-                    .trim_end_matches(|c| c == '\r' || c == '\n')
+                    .trim_end_matches(['\r', '\n'])
                     .to_string();
                 return Some(line);
             }

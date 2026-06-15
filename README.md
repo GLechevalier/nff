@@ -2,7 +2,9 @@
 
 nff is an MCP server that gives LLMs direct control over physical hardware — on the bench during development, and in the field for maintenance and diagnosis.
 
-Connect your board over USB and Claude writes, compiles, flashes, and reads serial output autonomously. Deploy devices with nff's agent SDK and Claude can reach them remotely: capture crash state, diagnose failures, and push fixes — without physical access.
+Connect your board over USB and Claude writes, compiles, flashes, and reads serial output autonomously. Deploy devices with the `nff-sdk-c` library and Claude can reach them remotely: capture crash state, diagnose failures, and push fixes — without physical access.
+
+> **nff is the open-source bench CLI of the [nff platform](../README.md)** — an end-to-end, agent-driven system for developing, shipping, and operating ESP32-class firmware (bench → OTA → fleet diagnosis). This repo (`nff`) and the device library (`nff-sdk-c`) are the two **MIT-licensed** pieces that run on the engineer's laptop and hardware; the hosted backend (fleet broker, OTA orchestration, crash-analysis engine) is proprietary. See the [root README](../README.md) for the full picture.
 
 ```
 you: "Run the sensor init sequence and assert the calibration values over serial"
@@ -15,7 +17,7 @@ LLM: [captures panic over OTA] → [reads registers + backtrace] → "Stack over
 **Supported boards:** ESP32 (CP210x / CH340) · ESP8266 (FTDI) · Arduino AVR (Uno, Mega, Nano, Leonardo)  
 STM32 and RP2040 support in progress — open a PR, adding a board is [two lines of code](CONTRIBUTING.md#adding-a-new-board).
 
-**Built in Rust.** Single compiled binary, no Python runtime required at runtime. Installed via `pip install nff` using [maturin](https://github.com/PyO3/maturin), which compiles and packages the binary automatically.
+**Built in Python (Click + MCP).** This is the live implementation — `pip install nff` is a pure-Python install (hatchling), no toolchain required. A Rust port lives in `nff-rs/` but is currently **paused**; the Python package under `nff/nff/` is the source of truth and where new features (such as the port-free `compile` tool) land first.
 
 ---
 
@@ -47,20 +49,38 @@ Each failure class produces a different panic format, exception code, backtrace 
 
 ## MCP Tools
 
+### Bench — hardware & build
+
 | Tool | What it does |
 |---|---|
 | `list_devices()` | List all connected USB boards |
-| `flash(path, board?, port?)` | Compile and upload a sketch directory |
+| `compile(sketch?, code?, board?)` | Compile a sketch **only** (no board/port) to verify it builds; returns JSON `{ok, fqbn, elf, image, artifacts, errors, output}` |
+| `flash(sketch?, code?, board?, port?)` | Compile **and** upload a sketch to the connected board |
 | `serial_read(duration_ms?, port?, baud?)` | Capture serial output for N ms |
 | `serial_write(data, port?, baud?)` | Send a string to the device |
 | `reset_device(port?)` | Toggle DTR to hardware-reset the board |
 | `get_device_info(port?)` | Return port, board name, FQBN, baud rate |
 
-All tools fall back to the default device in `~/.nff/config.json` when `port` and `board` are omitted.
+### Simulation — Wokwi (CI without a bench)
 
-> **`flash` takes a directory path, not raw source code.** Write the `.ino` file to disk first, then pass the sketch directory. Passing raw code triggers a path-resolution bug in the build artifact lookup.
+| Tool | What it does |
+|---|---|
+| `wokwi_flash(code, board?, timeout_ms?)` | Compile and simulate a sketch via Wokwi |
+| `wokwi_serial_read(code, board?, duration_ms?)` | Compile, simulate, return serial output |
+| `wokwi_get_diagram(board)` | Return a minimal `diagram.json` stub to extend |
 
-Simulation via Wokwi also supported — useful for CI without a bench. See [Wokwi simulation](#wokwi-simulation) below.
+### Field — diagnosis & auth
+
+| Tool | What it does |
+|---|---|
+| `repair(serial_output, build_id?, board?)` | Send serial/crash output to the diagnosis server and return a structured diagnosis |
+| `authenticate(email?, password?)` | Log in to the diagnosis server (direct, or omit both for browser OAuth) |
+| `complete_authentication(timeout?)` | Wait for a browser login to finish and store the tokens |
+| `auth_status()` / `auth_logout()` / `auth_clear()` / `auth_reconnect(email?, password?)` | Inspect, end, force-clear, or re-establish the authenticated MCP session |
+
+All bench tools fall back to the default device in `~/.nff/config.json` when `port` and `board` are omitted.
+
+> **Prefer `sketch=` (a path) over `code=`.** Write the `.ino` file to disk first and pass the sketch path, rather than raw source — it keeps the build artifact lookup deterministic. Use `compile` to check a build with no board attached; use `flash` only when a port is present.
 
 ---
 
@@ -88,9 +108,7 @@ Get your hardware on the LLM loop in under five minutes.
 pip install nff
 ```
 
-The package uses [maturin](https://github.com/PyO3/maturin) — `pip install` compiles the Rust binary and places it on your PATH automatically. No separate Rust toolchain needed as a user.
-
-`esptool` is bundled — no separate install needed.
+Pure-Python install (requires Python ≥ 3.10) — no compiler or Rust toolchain needed. `esptool` ships as a dependency, so no separate install is needed.
 
 ### 2. Install board cores
 
@@ -139,11 +157,14 @@ nff doctor
 | Command | Description |
 |---|---|
 | `nff init` | Detect board, write config, register MCP server |
+| `nff compile <path>` | Compile a sketch to verify it builds (no board/port needed) |
 | `nff flash <path>` | Compile and upload a sketch directory |
 | `nff monitor` | Stream serial output (Ctrl+C to exit) |
 | `nff connect` | Attach to a device, continuously analyse its logs, autonomously repair detected issues |
+| `nff repair` | Send captured serial/crash output to the diagnosis server for a structured root-cause |
+| `nff auth login` | Authenticate with the diagnosis server (browser OAuth or email/password) |
 | `nff doctor` | Check all dependencies and configuration |
-| `nff mcp` | Start the MCP server (called automatically by Claude Code) |
+| `nff mcp` | Start the MCP server (streamable HTTP on `127.0.0.1:3000`; called automatically by Claude Code) |
 
 ```bash
 nff flash sketches/sensor_init
@@ -243,7 +264,7 @@ nff ships two Claude Code skills **automatically installed to `~/.claude/command
 /wokwi-diagram
 ```
 
-Skill files are in `.claude/commands/` for project-level use and bundled inside `nff/skills/` so they ship with every `pip install nff`.
+Skill files are bundled inside the package at `nff/nff/skills/` (the source of truth — edit them there) so they ship with every `pip install nff`, and are also mirrored in `.claude/commands/` for project-level use.
 
 ---
 
@@ -251,36 +272,34 @@ Skill files are in `.claude/commands/` for project-level use and bundled inside 
 
 ```
 nff/
-├── nff-rs/                      # Rust binary (primary codebase)
-│   ├── Cargo.toml               # Workspace root
-│   ├── Cargo.lock
-│   └── nff/
-│       ├── Cargo.toml           # nff v0.2.x
-│       └── src/
-│           ├── main.rs          # Entry point — routes all subcommands
-│           ├── cli.rs           # Clap CLI definitions
-│           ├── mcp_server.rs    # Native Rust MCP server (rmcp)
-│           ├── commands/
-│           │   ├── mod.rs
-│           │   ├── init.rs
-│           │   ├── flash.rs
-│           │   ├── monitor.rs
-│           │   ├── connect.rs
-│           │   ├── ota.rs
-│           │   ├── doctor.rs
-│           │   ├── clean.rs
-│           │   ├── install_deps.rs
-│           │   ├── mcp.rs
-│           │   └── wokwi.rs
-│           └── tools/
-│               ├── mod.rs
-│               ├── config.rs    # ~/.nff/config.json read/write
-│               ├── boards.rs    # USB vendor ID detection
-│               ├── serial.rs    # serialport read/write/stream
-│               ├── toolchain.rs # arduino-cli subprocess wrappers
-│               ├── installer.rs # arduino-cli auto-install
-│               └── wokwi.rs    # WokwiRunner, diagram generation
-├── nff/                         # Python package (legacy — nff test only)
+├── nff/                         # Python package — the LIVE implementation
+│   ├── cli.py                   # Click CLI — wires every subcommand
+│   ├── config.py                # ~/.nff/config.json read/write
+│   ├── mcp_server.py            # streamable-HTTP MCP server (Bearer-authed /mcp)
+│   ├── commands/
+│   │   ├── init.py
+│   │   ├── compile_cmd.py       # port-free build check
+│   │   ├── flash.py
+│   │   ├── monitor.py
+│   │   ├── connect.py           # autonomous log-analysis + repair loop
+│   │   ├── repair.py            # route crash output to the diagnosis server
+│   │   ├── auth_cmd.py          # nff auth login / status / logout
+│   │   ├── ota.py
+│   │   ├── provision.py
+│   │   ├── doctor.py
+│   │   ├── clean.py
+│   │   ├── install_deps.py
+│   │   ├── mcp_cmd.py
+│   │   └── wokwi_cmd.py
+│   ├── tools/
+│   │   ├── boards.py            # USB vendor/product ID detection
+│   │   ├── serial.py            # serial read/write/stream/reset
+│   │   ├── toolchain.py         # arduino-cli + esptool subprocess wrappers
+│   │   ├── installer.py         # arduino-cli auto-install
+│   │   ├── auth.py              # diagnosis-server token handling
+│   │   └── wokwi.py             # Wokwi runner + diagram generation
+│   └── skills/                  # /nff + /wokwi-diagram skills (ship with the package)
+├── nff-rs/                      # Rust port — PAUSED (not the source of truth)
 ├── sketches/
 │   ├── blink_esp32/
 │   └── servo_button/
@@ -292,7 +311,7 @@ nff/
         └── wokwi-diagram.md     # /wokwi-diagram Claude Code skill
 ```
 
-The Python package (`nff/`) is kept solely for `nff test`, which delegates to `python -m nff test`. All other commands run from the Rust binary. Do not edit `nff/nff/mcp_server.py` — it is superseded by `nff-rs/nff/src/mcp_server.rs`.
+The Python package under `nff/nff/` is the active development surface — every command and MCP tool runs from it. The Rust port in `nff-rs/` was an effort to ship a single compiled binary; it is currently **paused** and should not be treated as the source of truth. Edit the Python files (`mcp_server.py`, `tools/`, `commands/`) — that is where features land.
 
 ---
 

@@ -1,7 +1,8 @@
 # nff — Wokwi Simulation Context
 
 ## Hard Rules
-- Always use `nff flash --sim` to compile — never call arduino-cli directly.
+- To check a sketch builds, use `nff compile <sketch>` (no board/port needed) — never call arduino-cli directly.
+- Use `nff flash --sim` to compile + simulate, and `nff flash <sketch>` to upload to hardware.
 - Always use `nff wokwi run` or `nff wokwi run --gui` to simulate.
 - Never install libraries with arduino-cli. Use built-in ESP32 APIs only,
   or ask the user to install the library first.
@@ -87,16 +88,102 @@ Always set minAngle: "-90" and maxAngle: "90" on wokwi-servo in diagram.json.
 
 ## Status
 
-The Python `nff` binary has been fully replaced by a compiled Rust binary — single executable,
-no Python runtime required for end users, stronger types, better cross-platform packaging.
+> **CURRENT (2026-06): the Python package under `nff/nff/` is the active development surface.**
+> The Rust port (`nff-rs/`) is paused — do **not** treat it as the source of truth and do **not**
+> skip editing the Python files. `nff/nff/mcp_server.py`, `tools/toolchain.py`, and the commands
+> are the live implementation; new features (e.g. the port-free `compile` tool) land here first.
+> The Rust migration notes below are retained for when that work resumes later.
+
+The Rust port aimed to replace the Python `nff` with a single compiled binary — no Python runtime
+for end users, stronger types, better cross-platform packaging.
 
 The MCP server is now native Rust (`nff-rs/nff/src/mcp_server.rs`, rmcp crate). Wokwi
 integration is also native Rust (`tools/wokwi.rs`). Only `nff test` still delegates to the
 Python package via subprocess.
 
-**Adding a new MCP tool:** add it to `nff-rs/nff/src/mcp_server.rs` — implement a method on
-`NffServer` with the `#[tool(...)]` attribute. Do not edit `nff/nff/mcp_server.py`; it is
-superseded.
+**Adding a new MCP tool (current Python flow):** add an `async def` handler in
+`nff/nff/mcp_server.py`, register it in both `_TOOLS` (with an `inputSchema`) and `_DISPATCH`.
+Local hardware/toolchain logic lives in `nff/nff/tools/`. *(When the Rust port resumes, the
+equivalent is a `#[tool(...)]` method on `NffServer` in `nff-rs/nff/src/mcp_server.rs`.)*
+
+## Claude ↔ nff Handshake
+
+### 1. Registration (`nff init`)
+
+`nff init` calls `register_mcp_claude_code()` (`commands/init.rs`) which runs:
+
+```
+claude mcp add --scope user nff <nff_exe_path> mcp
+```
+
+This makes Claude Code aware of `nff mcp` as a user-scoped MCP server. The correct full
+form that includes the HTTP transport and Bearer token is:
+
+```
+claude mcp add --scope user --transport http \
+  --url http://127.0.0.1:3000/mcp \
+  --header "Authorization: Bearer <access_token>" nff
+```
+
+> **Gap:** `register_mcp_claude_code()` currently omits `--transport http`, `--url`, and
+> `--header`. Until this is fixed, run the full command above manually after `nff auth login`.
+
+### 2. Transport
+
+`nff mcp` starts a **streamable HTTP MCP server** on `http://127.0.0.1:3000/mcp`
+(default; override with `--host` / `--port`). All MCP messages — initialize, tools/list,
+tools/call — are HTTP POST requests to that path, handled by the `rmcp` crate.
+
+### 3. Bearer authentication
+
+Every request to `/mcp` passes through the `bearer_auth` axum middleware
+(`mcp_server.rs`). It validates `Authorization: Bearer <token>` against
+`config.diagnosis.access_token` in `~/.nff/config.json`. A missing or wrong token
+returns HTTP 401 and Claude surfaces an "Unauthorized" error for every tool call.
+
+**One-time bootstrap order:**
+
+```
+1. nff auth login        # browser OAuth or direct email/password login
+                         # → writes access_token + refresh_token to ~/.nff/config.json
+2. nff init              # detects board, writes config, then calls register_mcp_claude_code()
+                         # (or register manually with the --header form above)
+3. Restart Claude Code   # Claude picks up the new MCP registration
+```
+
+### 4. Tool call flow
+
+```
+Claude Code
+    │
+    │  HTTP POST  http://127.0.0.1:3000/mcp
+    │  Authorization: Bearer <access_token>
+    │  Body: MCP tools/call { "name": "...", "arguments": {...} }
+    ▼
+nff mcp server  (bearer_auth validates token vs ~/.nff/config.json)
+    │
+    ├──► local tools
+    │       list_devices, flash, serial_read, serial_write,
+    │       reset_device, get_device_info,
+    │       wokwi_flash, wokwi_serial_read, wokwi_get_diagram
+    │       — operate on local hardware / toolchain; no further auth
+    │
+    └──► diagnosis tools
+            authenticate, auth_status, auth_logout, repair
+            — POST to config.diagnosis.server_url (/api/auth/*, /api/repair)
+            — repair auto-refreshes the access_token on 401 using stored refresh_token;
+              clears tokens and returns ERROR: session expired if refresh also fails
+```
+
+### 5. Response conventions
+
+| Result type | Format |
+|---|---|
+| Success (scalar) | `"OK: …"` string |
+| Failure | `"ERROR: …"` string |
+| Structured data | JSON string (`list_devices`, `get_device_info`, `wokwi_flash`, `repair`) |
+
+Claude can branch on the `OK:` / `ERROR:` prefix without parsing JSON for scalar results.
 
 ## Migration Scope
 

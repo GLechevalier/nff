@@ -1,0 +1,53 @@
+"""nff compile — compile a sketch only (no upload, no port required)."""
+
+import pathlib
+
+import click
+from rich.console import Console
+
+from nff import config
+from nff.tools import toolchain
+
+console = Console()
+
+
+@click.command(name="compile")
+@click.argument("file", type=click.Path(exists=True))
+@click.option("--board", default=None, help="Board FQBN (defaults to configured board)")
+@click.option("--json", "as_json", is_flag=True, help="Emit the raw JSON result")
+def compile_cmd(file, board, as_json):
+    """Compile a sketch and report what was produced — never uploads.
+
+    FILE may be a .ino file or a sketch folder. No board connection is needed,
+    so this is the fast way to check that a sketch builds.
+    """
+    fqbn = board or config.get_default_device().get("fqbn") or ""
+    if not fqbn:
+        raise click.ClickException("No board FQBN — pass --board or run `nff init`")
+
+    try:
+        result = toolchain.compile_only(fqbn, source=pathlib.Path(file))
+    except toolchain.ToolchainError as exc:
+        raise click.ClickException(str(exc))
+
+    if as_json:
+        import json
+        click.echo(json.dumps(result.to_dict(), indent=2))
+        if not result.ok:
+            raise SystemExit(1)
+        return
+
+    if not result.ok:
+        console.print("[red]Compile failed[/red]")
+        for line in (result.errors or [result.output]):
+            click.echo(line)
+        raise SystemExit(1)
+
+    console.print(f"[green]Compile succeeded[/green] ({fqbn})")
+    size = toolchain._extract_size(result.output)
+    if size:
+        console.print(size)
+    if result.elf:
+        console.print(f"elf:   {result.elf}")
+    if result.image and result.image != result.elf:
+        console.print(f"image: {result.image}")

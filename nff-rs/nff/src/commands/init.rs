@@ -207,30 +207,34 @@ fn write_success(_port: &str, _board: &str, device: Option<&boards::DetectedDevi
     register_mcp_claude_code();
 }
 
+/// The streamable-HTTP MCP endpoint the `nff mcp` server listens on by default.
+/// Registration uses HTTP transport (not stdio): Claude discovers the OAuth proxy
+/// via the 401 + `.well-known` metadata and drives the browser login itself, so no
+/// static Bearer header is registered. Start the server with `nff mcp`.
+pub const MCP_URL: &str = "http://127.0.0.1:3010/mcp";
+
 fn register_mcp_claude_code() {
     let claude = match which("claude") {
         Ok(p) => p,
         Err(_) => {
             println!("  `claude` CLI not found — skipping Claude Code registration.");
-            println!("  To register manually: claude mcp add nff nff mcp");
+            println!("  To register manually: claude mcp add --scope user --transport http nff {MCP_URL}");
             return;
         }
     };
 
-    let nff_exe = std::env::current_exe()
-        .map(|p| p.to_str().unwrap_or("nff").to_string())
-        .unwrap_or_else(|_| "nff".to_string());
-
     let result = std::process::Command::new(&claude)
-        .args(["mcp", "add", "--scope", "user", "nff", &nff_exe, "mcp"])
+        .args(["mcp", "add", "--scope", "user", "--transport", "http", "nff", MCP_URL])
         .output();
 
     match result {
         Ok(out) if out.status.success() => {
-            println!("  ✓ Registered with Claude Code CLI (claude mcp add nff nff mcp)");
+            println!("  ✓ Registered with Claude Code CLI (claude mcp add --transport http nff {MCP_URL})");
+            println!("  Start the server with `nff mcp`, then authenticate in Claude (OAuth opens in your browser).");
         }
         _ => {
-            println!("  Could not register with Claude Code CLI. Run manually: claude mcp add nff nff mcp");
+            println!("  Could not register with Claude Code CLI.");
+            println!("  Run manually: claude mcp add --scope user --transport http nff {MCP_URL}");
         }
     }
 }

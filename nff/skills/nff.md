@@ -24,19 +24,38 @@ Run through this checklist every time before touching a `.ino` file.
 [ ] Set a baud rate for Serial.begin() and write it down — it must match ~/.nff/config.json
 [ ] Confirm no external library is needed. If one is, stop and ask the user to install it first.
       Built-in only: Wire, SPI, EEPROM, Preferences, tone(), ledcAttach/ledcWrite
-[ ] Never pass raw code to MCP tools — file on disk is the only valid input
+[ ] Point nff tools at the file on disk, never at an inline code blob
       WRONG: mcp__nff__flash(code="void setup()...")
-      RIGHT: Write .ino file with Write tool → nff flash sketches/<name>
+      RIGHT: Write .ino → mcp__nff__compile(sketch="sketches/<name>")  (no board needed)
+             then  mcp__nff__flash(sketch="sketches/<name>")          (uploads)
+      CLI equivalent: nff compile sketches/<name>   /   nff flash sketches/<name>
 ```
 
 ---
 
 ## Core Rules
 
-- **Always use `nff flash` to compile/flash** — never call `arduino-cli` directly.
+- **Never call `arduino-cli` directly.** Everything you need is an nff tool:
+  - To check a sketch builds → `nff compile` (MCP `compile`). No board, no port — this is the
+    one to reach for whenever you just want to know "does it compile?".
+  - To upload to real hardware → `nff flash` (MCP `flash`).
+  - To run in the simulator → `nff flash --sim` then `nff wokwi run`.
+  There is no situation where dropping to raw `arduino-cli` is correct — if an nff tool seems to be
+  missing a capability, say so rather than bypassing it.
 - **Never install libraries with `arduino-cli lib install`** — write sketches that use built-in APIs only, or ask the user to install the library first.
 - For ESP32 servo control use `ledcAttach` / `ledcWrite` (built-in LEDC, no library needed).
 - The working directory for all `nff` commands is the sketch folder (where `wokwi.toml` lives).
+
+### compile vs flash vs sim — pick the right one
+
+| Goal | Tool | Needs a board/port? | Returns |
+|---|---|---|---|
+| "Does it build?" | `compile` | No | `{ok, elf, image, errors}` — clean pass/fail |
+| Upload to hardware | `flash` | Yes (port) | `OK: flash complete` / `ERROR: …` |
+| Run in Wokwi | `flash --sim` + `wokwi run` | No | serial output |
+
+`compile` and `flash` are **separate** on purpose: compile never touches a port, so a missing/blocked
+serial port can never make a pure build check fail. Compile first, fix any `errors`, then flash.
 
 ### Sketch-First Rule (mandatory — no exceptions)
 
@@ -100,14 +119,24 @@ in the current directory). If the diagram has already been designed separately (
 
 #### Step 3 — Compile
 
+First just verify it builds (no board needed):
+
+```bash
+nff compile sketches/<name> --board <fqbn>
+```
+
+This prints `Compile succeeded` plus the exact artifact paths, or the `error:` lines if it failed.
+Then compile + simulate in one step:
+
 ```bash
 nff flash --sim sketches/<name> --board <fqbn>
 ```
 
-Compiles the sketch and writes the ELF to:
+Both write artifacts to the **deterministic** build directory:
 
 ```
-sketches/<name>/build/<fqbn_dotted>/<name>.elf/<name>.ino.elf
+sketches/<name>/build/<fqbn_dotted>/<name>.ino.elf          ← ELF (drives the simulator)
+sketches/<name>/build/<fqbn_dotted>/<name>.ino.merged.bin   ← flashable image (real hardware)
 ```
 
 `<fqbn_dotted>` = FQBN with `:` replaced by `.`
@@ -118,15 +147,17 @@ sketches/<name>/build/<fqbn_dotted>/<name>.elf/<name>.ino.elf
 | `arduino:avr:uno` | `arduino.avr.uno` |
 | `arduino:avr:nano` | `arduino.avr.nano` |
 
-Full ELF path examples:
+Full path example:
 ```
-sketches/blink/build/esp32.esp32.esp32/blink.elf/blink.ino.elf
-sketches/simon_game/build/esp32.esp32.esp32/simon_game.elf/simon_game.ino.elf
+sketches/blink/build/esp32.esp32.esp32/blink.ino.elf
 ```
 
-A timeout error at this step is **expected** — the headless sim starts and immediately times out
-because nothing triggers the program. What matters is that compilation succeeded (exit code 0,
-no `error:` lines in output).
+> Don't guess the path — `nff compile` reports `elf:` and `image:` for you. The ELF is `<name>.ino.elf`
+> directly under `build/<fqbn_dotted>/` (not nested inside a `<name>.elf/` folder).
+
+A timeout error from `flash --sim` is **expected** — the headless sim starts and immediately times out
+because nothing triggers the program. What matters is that compilation succeeded (use `nff compile`
+to confirm cleanly: `ok` true, empty `errors`).
 
 #### Step 4 — Sync `wokwi.toml`
 
@@ -139,8 +170,9 @@ elf      = "build/<fqbn_dotted>/<name>.ino.elf"
 firmware = "build/<fqbn_dotted>/<name>.ino.merged.bin"
 ```
 
-Both fields are **required** — `elf` drives the simulator; `firmware` is the merged binary for
-flashing real hardware. `nff wokwi init` generates both automatically.
+`elf` drives the simulator; `firmware` is the merged binary for flashing real hardware.
+`nff flash --sim` and `nff wokwi init` now fill in **both** automatically (firmware is auto-detected
+from the sibling `*.merged.bin`), so you normally don't touch this file by hand.
 
 > Paths are **relative** to the folder containing `wokwi.toml` (i.e. `sketches/<name>/`).
 > If either field is missing or wrong, fix it now — a wrong path causes a silent "no firmware"
@@ -172,8 +204,8 @@ This is the loop to repeat for every fix or feature addition:
 
 ```
 1. Edit .ino  →  Edit tool on sketches/<name>/<name>.ino
-2. Recompile  →  nff flash --sim sketches/<name> --board <fqbn>
-3. Simulate   →  nff wokwi run --gui   (or --serial-log for headless)
+2. Recompile  →  nff compile sketches/<name> --board <fqbn>   (fast build check, no board)
+3. Simulate   →  nff flash --sim sketches/<name> --board <fqbn>  then  nff wokwi run --gui
 4. If wrong   →  back to step 1
 ```
 
@@ -255,11 +287,20 @@ Scans USB ports, identifies the board, writes `~/.nff/config.json`.
 
 ### Step 2 — Compile and flash
 
+Build-check first (no port, can't be derailed by a busy serial port):
+
+```bash
+nff compile sketches/<name>
+```
+
+Once it reports `Compile succeeded`, upload:
+
 ```bash
 nff flash sketches/<name>
 ```
 
-Uses board and port from config. Override with `--board <fqbn> --port <port>`.
+`nff flash` takes a sketch **folder** or a `.ino` file. It uses board and port from config;
+override with `--board <fqbn> --port <port>`:
 
 ```bash
 nff flash sketches/<name> --board esp32:esp32:esp32 --port COM3
@@ -294,7 +335,7 @@ all serial debugging.
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| Compilation error | Sketch bug | Fix `.ino`, re-run `nff flash --sim` |
+| Compilation error | Sketch bug | Read the `error:` lines from `nff compile`, fix `.ino`, re-run `nff compile` |
 | Simulator opens but nothing happens | Wrong path in `wokwi.toml` | Check both `elf =` and `firmware =` — must match actual build output |
 | Simulator opens but nothing happens | `diagram.json` not in same folder as `wokwi.toml` | Move or symlink `diagram.json` to `sketches/<name>/` |
 | LED never lights | Wiring reversed (resistor after LED, not before) | Check chain: GPIO → R → LED_A … LED_C → GND |

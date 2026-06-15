@@ -45,9 +45,10 @@ fn version_flag_exits_successfully() {
 fn version_output_matches_cargo_version() {
     let out = run(&["--version"]);
     let text = stdout(&out);
+    let expected = env!("CARGO_PKG_VERSION");
     assert!(
-        text.contains("0.2.16"),
-        "version output should contain 0.2.16, got: {text}"
+        text.contains(expected),
+        "version output should contain {expected}, got: {text}"
     );
 }
 

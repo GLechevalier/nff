@@ -1,6 +1,6 @@
 [build-system]
-requires = ["maturin>=1,<2"]
-build-backend = "maturin"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project]
 name = "nff"
@@ -28,7 +28,11 @@ dependencies = [
     "click>=8.0",
     "rich>=13.0",
     "esptool>=4.0",
+    "requests>=2.28",
 ]
+
+[project.scripts]
+nff = "nff:run"
 
 [project.urls]
 Homepage = "https://github.com/GLechevalier/nff"
@@ -41,14 +45,10 @@ dev = [
     "pytest-asyncio>=0.23",
     "black",
     "ruff",
-    "maturin>=1,<2",
 ]
 
-[tool.maturin]
-bindings      = "bin"
-manifest-path = "nff-rs/nff/Cargo.toml"
-python-source = "."
-include       = [{ path = "nff/skills/*.md", format = "wheel" }]
+[tool.hatchling.build]
+packages = ["nff"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
