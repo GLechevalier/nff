@@ -15,6 +15,7 @@ from nff.commands.install_deps import install_deps
 from nff.commands.mcp_cmd import mcp
 from nff.commands.monitor import monitor
 from nff.commands.ota import ota
+from nff.commands.pi import pi
 from nff.commands.provision import provision
 from nff.commands.repair import repair
 from nff.commands.wokwi_cmd import wokwi_cli
@@ -41,3 +42,4 @@ cli.add_command(auth_cli, name="auth")
 cli.add_command(wokwi_cli, name="wokwi")
 cli.add_command(repair)
 cli.add_command(agent)
+cli.add_command(pi, name="pi")

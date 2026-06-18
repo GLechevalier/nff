@@ -21,6 +21,10 @@ _DEFAULT = {
     # reach the connected hardware); project_id is optional (the worker resolves it
     # from the diagnosis JWT when unset). Auth reuses the diagnosis tokens.
     "agent": {"server_url": "https://agent.nanoforgeflow.com", "local_mcp_url": "http://127.0.0.1:3010/mcp", "project_id": None},
+    # Platform onboarding (`nff init` → connect a real board to the cloud fleet).
+    # broker_host is the public mTLS broker the device dials; project_id/batch_id are
+    # remembered so a re-run reuses the same project + bootstrap batch.
+    "platform": {"broker_host": "152.228.219.243", "project_id": None, "batch_id": None},
 }
 
 
@@ -182,4 +186,23 @@ def set_agent_project_id(project_id) -> None:
     data = load() if exists() else copy.deepcopy(_DEFAULT)
     data.setdefault("agent", copy.deepcopy(_DEFAULT["agent"]))
     data["agent"]["project_id"] = project_id
+    save(data)
+
+
+def get_platform_config() -> dict:
+    """Platform onboarding config, merged over defaults so older config files still
+    return every key (broker_host in particular)."""
+    try:
+        cfg = copy.deepcopy(_DEFAULT["platform"])
+        cfg.update(load().get("platform", {}))
+        return cfg
+    except ConfigError:
+        return copy.deepcopy(_DEFAULT["platform"])
+
+
+def set_platform_enrollment(project_id, batch_id) -> None:
+    data = load() if exists() else copy.deepcopy(_DEFAULT)
+    data.setdefault("platform", copy.deepcopy(_DEFAULT["platform"]))
+    data["platform"]["project_id"] = project_id
+    data["platform"]["batch_id"] = batch_id
     save(data)

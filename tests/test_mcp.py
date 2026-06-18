@@ -388,6 +388,38 @@ async def test_oauth_authorize_redirects_to_login(base_url):
     assert "oauth" in location and "callback" in location
 
 
+async def test_oauth_authorize_fast_paths_on_stored_mcp_token(base_url, isolated_config):
+    """A persisted MCP token (no diagnosis token) short-circuits authorize.
+
+    Cross-session persistence: a later session has only the stable MCP token in
+    config (e.g. the Supabase JWT expired/was cleared). authorize must still
+    issue a code for that SAME token instead of opening the browser, and the
+    exchanged token must equal the stored one.
+    """
+    from nff import config as cfg
+    cfg.set_mcp_tokens("nff_at_persisted", "nff_rt_persisted")
+    redirect_uri = "http://127.0.0.1:9999/callback"
+
+    async with httpx.AsyncClient(follow_redirects=False) as client:
+        resp = await client.get(
+            f"{base_url}/oauth/authorize",
+            params={"redirect_uri": redirect_uri, "state": "s2"},
+        )
+    assert resp.status_code == 302
+    location = resp.headers["location"]
+    assert location.startswith(redirect_uri)  # back to client, not the login page
+    assert "code=" in location and "state=s2" in location
+
+    code = location.split("code=")[1].split("&")[0]
+    async with httpx.AsyncClient() as client:
+        token_resp = await client.post(
+            f"{base_url}/oauth/token",
+            content=f"grant_type=authorization_code&code={code}",
+            headers={"content-type": "application/x-www-form-urlencoded"},
+        )
+    assert token_resp.json()["access_token"] == "nff_at_persisted"
+
+
 async def test_oauth_callback_stores_tokens_and_redirects(base_url, isolated_config):
     """GET /oauth/callback/{id} stores tokens and redirects to client redirect_uri."""
     from nff.mcp_server import _oauth_sessions
@@ -470,24 +502,29 @@ async def test_oauth_token_exchange_issues_refresh_token(base_url, isolated_conf
     assert data["expires_in"] == _MCP_TOKEN_TTL
 
 
-async def test_oauth_refresh_token_grant_rotates(base_url, isolated_config):
-    """refresh_token grant mints a fresh access+refresh pair (silent re-auth)."""
+async def test_oauth_refresh_token_grant_is_stable(base_url, isolated_config):
+    """refresh_token grant returns the SAME persistent pair (no rotation).
+
+    Stability is what lets login survive across sessions: Claude's stored
+    credential keeps matching config until an explicit deauth, so a silent
+    refresh never invalidates the token Claude already holds.
+    """
     from nff import config as cfg
-    cfg.set_mcp_tokens("nff_at_old", "nff_rt_old")
+    cfg.set_mcp_tokens("nff_at_cur", "nff_rt_cur")
 
     async with httpx.AsyncClient() as client:
         resp = await client.post(
             f"{base_url}/oauth/token",
-            content="grant_type=refresh_token&refresh_token=nff_rt_old",
+            content="grant_type=refresh_token&refresh_token=nff_rt_cur",
             headers={"content-type": "application/x-www-form-urlencoded"},
         )
     assert resp.status_code == 200
     data = resp.json()
-    assert data["access_token"] != "nff_at_old"      # rotated
-    assert data["refresh_token"] != "nff_rt_old"     # rotated
-    # config now holds the new pair, which is what /mcp validates against
-    assert cfg.get_mcp_tokens()["access_token"] == data["access_token"]
-    assert cfg.get_mcp_tokens()["refresh_token"] == data["refresh_token"]
+    assert data["access_token"] == "nff_at_cur"      # unchanged
+    assert data["refresh_token"] == "nff_rt_cur"     # unchanged
+    # config is untouched and still validates the token Claude already holds
+    assert cfg.get_mcp_tokens()["access_token"] == "nff_at_cur"
+    assert cfg.get_mcp_tokens()["refresh_token"] == "nff_rt_cur"
 
 
 async def test_oauth_refresh_token_grant_rejects_stale(base_url, isolated_config):
