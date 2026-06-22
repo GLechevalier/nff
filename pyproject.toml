@@ -53,9 +53,10 @@ packages = ["nff"]
 [tool.hatch.build.targets.wheel]
 packages = ["nff"]
 
-# Ship the bootstrap sketch + build_opt.h (consumed at runtime by `nff init` onboarding).
-[tool.hatch.build.targets.wheel.force-include]
-"nff/assets" = "nff/assets"
+# nff/assets (the bootstrap sketch + build_opt.h, consumed at runtime by `nff init`)
+# ships automatically as part of the `nff` package. A force-include here would add
+# the same paths a second time, which hatchling rejects ("A second file is being
+# added to the wheel archive at the same path").
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
