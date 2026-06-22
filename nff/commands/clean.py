@@ -10,9 +10,16 @@ import click
 @click.command()
 def clean():
     """Remove nff build artifacts."""
-    sketch_dir = Path(tempfile.gettempdir()) / "nff_sketch"
-    if sketch_dir.exists():
-        shutil.rmtree(sketch_dir, ignore_errors=True)
-        click.echo(f"Removed {sketch_dir}")
+    # nff_sketch = arduino-cli backend; nff_pio = PlatformIO backend (each scaffold's
+    # heavy .pio/build output lives nested inside nff_pio, so one rmtree clears it).
+    tmp = Path(tempfile.gettempdir())
+    removed = []
+    for name in ("nff_sketch", "nff_pio"):
+        d = tmp / name
+        if d.exists():
+            shutil.rmtree(d, ignore_errors=True)
+            removed.append(str(d))
+    if removed:
+        click.echo("\n".join(f"Removed {p}" for p in removed))
     else:
         click.echo("Nothing to clean.")

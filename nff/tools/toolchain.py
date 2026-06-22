@@ -1,5 +1,15 @@
-"""arduino-cli subprocess wrappers, sketch management, and flashing utilities."""
+"""Firmware build dispatcher + arduino-cli backend.
 
+This module hosts the arduino-cli implementation (compile/upload/stream, sketch
+management, flashing) AND the thin dispatch layer that routes the public entry points
+(``compile_only``, ``flash``, ``stream_compile``, ``stream_upload``,
+``resolve_sketch_dir``, ``discover_artifacts``) to the active build backend. The
+default backend is arduino-cli (these functions, unchanged); set
+``NFF_BUILD_BACKEND=platformio`` (or ``build.backend`` in config) to route to
+:mod:`nff.tools.backends.platformio` instead. Callers keep using ``toolchain.*``.
+"""
+
+import os
 import re
 import shutil
 import subprocess
@@ -9,9 +19,60 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterator, Optional, Tuple
 
+from nff import config
 from nff.tools import retry as _retry
 
 _SKETCH_DIR = Path(tempfile.gettempdir()) / "nff_sketch"
+
+
+def active_backend() -> str:
+    """The selected build backend: "platformio" (the default) or "arduino".
+
+    Precedence: ``NFF_BUILD_BACKEND`` env var → ``build.backend`` in config →
+    "platformio". "pio" is accepted as an alias for "platformio"; only an explicit
+    "arduino"/"arduino-cli" selects the arduino-cli backend.
+    """
+    name = os.environ.get("NFF_BUILD_BACKEND")
+    if not name:
+        try:
+            name = (config.get_build_config() or {}).get("backend")
+        except Exception:
+            name = None
+    name = (name or "platformio").strip().lower()
+    return "arduino" if name in ("arduino", "arduino-cli") else "platformio"
+
+
+def _pio_active() -> bool:
+    return active_backend() == "platformio"
+
+
+def package_recover(board: str) -> Optional[Callable[[str], None]]:
+    """A between-retries repair hook for the active backend's package faults, or None.
+
+    On the PlatformIO backend this prunes a half-installed platform so a retried build
+    reinstalls clean; the arduino backend has nothing to repair this way.
+    """
+    if _pio_active():
+        from nff.tools.backends import platformio as _pio
+        return lambda out: _pio._recover_packages(out, board)
+    return None
+
+
+def configured_board() -> str:
+    """The board identifier for the active backend, or "" if unset.
+
+    For platformio this is ``build.board`` (a PlatformIO board id, e.g. ``esp32dev``),
+    falling back to the legacy ``default_device.fqbn``; for arduino it is
+    ``default_device.fqbn`` (an arduino-cli FQBN).
+    """
+    try:
+        if _pio_active():
+            board = (config.get_build_config() or {}).get("board")
+            if board:
+                return board
+        return config.get_default_device().get("fqbn") or ""
+    except Exception:
+        return ""
 
 # Command timeouts (seconds). The generic _RUN_TIMEOUT covers short commands;
 # a cold ESP32 first build easily exceeds 120s, so compile gets its own ceiling.
@@ -270,7 +331,14 @@ def resolve_sketch_dir(
       matches the file stem; otherwise the sketch is copied into a temp folder
       named after the stem (so a loose ``blink.ino`` still compiles).
     - ``code`` is a string        → written to ``sketch_dir`` (default temp).
+
+    Under the platformio backend this delegates to the pio project scaffold instead
+    (``src/main.cpp`` + generated ``platformio.ini``), so the returned path is a
+    ready-to-build PlatformIO project rather than an arduino sketch folder.
     """
+    if _pio_active():
+        from nff.tools.backends import platformio as _pio
+        return _pio.resolve_project(code=code, source=source, sketch_dir=sketch_dir)
     if source is not None:
         src = Path(source)
         if src.is_dir():
@@ -320,6 +388,9 @@ def discover_artifacts(sketch_dir: Path, fqbn: str) -> dict[str, Path]:
     Looks first at the deterministic build dir, then falls back to a recursive
     scan so a stray build layout still resolves instead of crashing.
     """
+    if _pio_active():
+        from nff.tools.backends import platformio as _pio
+        return _pio.discover_artifacts(sketch_dir, fqbn)
     build_dir = _build_dir(sketch_dir, fqbn)
     name = sketch_dir.name
     found: dict[str, Path] = {}
@@ -387,6 +458,9 @@ def upload_sketch(sketch_dir: Path, fqbn: str, port: str) -> RunResult:
 
 
 def stream_compile(sketch_dir: Path, fqbn: str) -> ProcessStream:
+    if _pio_active():
+        from nff.tools.backends import platformio as _pio
+        return _pio.stream_compile(sketch_dir, fqbn)
     cli = _require_arduino_cli()
     build_path = _build_dir(sketch_dir, fqbn)
     build_path.mkdir(parents=True, exist_ok=True)
@@ -395,6 +469,9 @@ def stream_compile(sketch_dir: Path, fqbn: str) -> ProcessStream:
 
 
 def stream_upload(sketch_dir: Path, fqbn: str, port: str) -> ProcessStream:
+    if _pio_active():
+        from nff.tools.backends import platformio as _pio
+        return _pio.stream_upload(sketch_dir, fqbn, port)
     cli = _require_arduino_cli()
     build_path = _build_dir(sketch_dir, fqbn)
     cmd = [cli, "upload", "--fqbn", fqbn, "--port", port]
@@ -421,15 +498,17 @@ def stream_with_retry(
     emit: Callable[[str], None],
     *,
     backoff: Tuple[float, ...] = _retry.DEFAULT_BACKOFF,
+    recover: Optional[Callable[[str], None]] = None,
 ) -> int:
     """Run a live-streaming arduino-cli command with transient-failure retry.
 
     ``make_stream`` builds a fresh ProcessStream per attempt (a stream is
     single-use). Output is echoed live via ``emit``; a transient non-zero result
-    is retried after a banner. Returns the final returncode.
+    is retried after a banner. ``recover``, if given, is called with the captured
+    output between attempts for best-effort repair. Returns the final returncode.
     """
     return _retry.stream_with_retry(
-        make_stream, emit, run_stream_attempt, backoff=backoff
+        make_stream, emit, run_stream_attempt, backoff=backoff, recover=recover
     )
 
 
@@ -446,7 +525,25 @@ def compile_only(
     sketch-resolution problems raise, so callers can branch on ``.ok``.
     """
     if not fqbn:
-        raise ToolchainError("Missing board FQBN — pass board=/--board or run `nff init`")
+        raise ToolchainError(
+            "Missing board (FQBN or PlatformIO board id) — pass board=/--board "
+            "or run `nff init`"
+        )
+    if _pio_active():
+        from nff.tools.backends import platformio as _pio
+        if not _pio.find_platformio():
+            raise ToolchainError("platformio not found — run `nff install-deps`")
+        sd = _pio.resolve_project(code=code, source=source, sketch_dir=sketch_dir)
+        result = _pio.compile_sketch(sd, fqbn)
+        artifacts = _pio.discover_artifacts(sd, fqbn) if result.success else {}
+        return CompileResult(
+            ok=result.success,
+            fqbn=fqbn,
+            sketch_dir=sd,
+            returncode=result.returncode,
+            output=result.output,
+            artifacts=artifacts,
+        )
     if not find_arduino_cli():
         raise ToolchainError("arduino-cli not found — run `nff install-deps`")
     sd = resolve_sketch_dir(code=code, source=source, sketch_dir=sketch_dir)
@@ -478,6 +575,22 @@ def flash(
 ) -> str:
     """Compile then upload. Compile failures are reported distinctly from
     upload failures so the caller knows which half went wrong."""
+    if _pio_active():
+        from nff.tools.backends import platformio as _pio
+        if not _pio.find_platformio():
+            return "ERROR: platformio not found — run `nff install-deps`"
+        try:
+            sd = _pio.resolve_project(code=code, source=source, sketch_dir=sketch_dir)
+        except (OSError, ToolchainError) as exc:
+            return f"ERROR: {exc}"
+        compile_result = _pio.compile_sketch(sd, fqbn)
+        if not compile_result.success:
+            return f"ERROR: Compile failed:\n{compile_result.output}"
+        upload_result = _pio.upload_sketch(sd, fqbn, port)
+        if not upload_result.success:
+            return f"ERROR: Upload failed:\n{upload_result.output}"
+        return (f"OK: flash complete\n--- compile ---\n{compile_result.output}\n"
+                f"--- upload ---\n{upload_result.output}")
     try:
         sd = resolve_sketch_dir(code=code, source=source, sketch_dir=sketch_dir)
     except (OSError, ToolchainError) as exc:

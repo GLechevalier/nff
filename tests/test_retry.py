@@ -65,6 +65,17 @@ def test_real_upload_to_missing_port_is_transient():
     assert retry.is_transient(out)
 
 
+@pytest.mark.parametrize("text", [
+    "PlatformIO: package-manager-ioerror while downloading",
+    "PackageException: Could not install package",
+    "fatal error: pins_arduino.h: No such file or directory",
+    "Error: Platform 'espressif32' is not installed",
+])
+def test_pio_package_faults_are_transient(text):
+    # First-build PlatformIO package faults are retryable even when they carry "error:".
+    assert retry.is_transient(text)
+
+
 # ---------------------------------------------------------------------------
 # run_with_retry
 # ---------------------------------------------------------------------------
@@ -111,6 +122,19 @@ def test_run_with_retry_invokes_on_retry():
         attempt, sleep=lambda _s: None, on_retry=lambda n, why: seen.append((n, why))
     )
     assert seen == [(1, "Invalid argument")]
+
+
+def test_run_with_retry_invokes_recover_between_attempts():
+    attempt, _ = _driver([
+        _Result(False, "package-manager-ioerror"),
+        _Result(True, "ok"),
+    ])
+    recovered = []
+    out = retry.run_with_retry(
+        attempt, sleep=lambda _s: None, recover=recovered.append
+    )
+    assert out.success
+    assert recovered == ["package-manager-ioerror"]
 
 
 # ---------------------------------------------------------------------------

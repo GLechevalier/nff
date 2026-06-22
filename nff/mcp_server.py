@@ -39,10 +39,10 @@ def _resolve_port(port: Optional[str]) -> str:
 
 
 def _resolve_fqbn_and_port(board: Optional[str], port: Optional[str]) -> tuple[str, str]:
-    fqbn = board or config.get_default_device().get("fqbn") or ""
+    fqbn = board or toolchain.configured_board()
     resolved_port = port or config.get_default_device().get("port") or ""
     if not fqbn or not resolved_port:
-        raise ValueError("Missing board FQBN or port — pass them explicitly or run `nff init`")
+        raise ValueError("Missing board or port — pass them explicitly or run `nff init`")
     return fqbn, resolved_port
 
 
@@ -69,9 +69,9 @@ async def list_devices() -> dict:
 
 
 def _resolve_fqbn(board: Optional[str]) -> str:
-    fqbn = board or config.get_default_device().get("fqbn") or ""
+    fqbn = board or toolchain.configured_board()
     if not fqbn:
-        raise ValueError("Missing board FQBN — pass board= or run `nff init`")
+        raise ValueError("Missing board — pass board= or run `nff init`")
     return fqbn
 
 
@@ -183,9 +183,9 @@ async def wokwi_flash(
     board: Optional[str] = None,
     timeout_ms: int = 5000,
 ) -> dict:
-    fqbn = board or config.get_default_device().get("fqbn") or ""
+    fqbn = board or toolchain.configured_board()
     if not fqbn:
-        return {"serial_output": "", "compile_output": "ERROR: Missing board FQBN",
+        return {"serial_output": "", "compile_output": "ERROR: Missing board",
                 "exit_code": 1, "simulated": True}
     try:
         compile_output, elf_path = toolchain.compile(code, fqbn)
@@ -221,9 +221,9 @@ async def wokwi_serial_read(
     board: Optional[str] = None,
     duration_ms: int = 3000,
 ) -> str:
-    fqbn = board or config.get_default_device().get("fqbn") or ""
+    fqbn = board or toolchain.configured_board()
     if not fqbn:
-        return "ERROR: Missing board FQBN"
+        return "ERROR: Missing board"
     try:
         compile_output, elf_path = toolchain.compile(code, fqbn)
     except Exception as exc:
@@ -472,12 +472,12 @@ _TOOLS = [
     Tool(name="compile",
          description="Compile a sketch ONLY — no board or port needed. Use this to verify a "
                      "sketch builds. Pass sketch= (path to a .ino file or sketch folder, "
-                     "preferred) or code=. board= defaults to the configured FQBN. Returns "
+                     "preferred) or code=. board= defaults to the configured board. Returns "
                      "JSON: {ok, fqbn, elf, image, artifacts, errors, output}.",
          inputSchema={"type": "object", "properties": {
-             "sketch": {"type": "string", "description": "Path to a .ino file or sketch folder"},
+             "sketch": {"type": "string", "description": "Path to a .ino/.cpp file or sketch folder"},
              "code": {"type": "string", "description": "Raw sketch source (alternative to sketch=)"},
-             "board": {"type": "string", "description": "Board FQBN; defaults to configured board"}}}),
+             "board": {"type": "string", "description": "arduino-cli FQBN or PlatformIO board id; defaults to configured board"}}}),
     Tool(name="flash",
          description="Compile AND upload a sketch to the connected board (needs a port). "
                      "To only check that a sketch builds, use `compile` instead. Pass "
@@ -508,7 +508,7 @@ _TOOLS = [
              "code": {"type": "string"}, "board": {"type": "string"},
              "duration_ms": {"type": "integer", "default": 3000}},
              "required": ["code"]}),
-    Tool(name="wokwi_get_diagram", description="Return a minimal diagram.json for the given board FQBN",
+    Tool(name="wokwi_get_diagram", description="Return a minimal diagram.json for the given board (FQBN or PlatformIO board id)",
          inputSchema={"type": "object", "properties": {"board": {"type": "string"}},
                       "required": ["board"]}),
     Tool(name="authenticate",

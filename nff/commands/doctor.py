@@ -46,6 +46,24 @@ def check_arduino_cli() -> Check:
     )
 
 
+def check_build_backend() -> Check:
+    """The active build backend's tool: arduino-cli or PlatformIO."""
+    backend = toolchain.active_backend()
+    if backend == "platformio":
+        from nff.tools.backends import platformio as pio
+        ver = pio.platformio_version()
+        if ver:
+            return Check(passed=True, detail=f"platformio · {ver}")
+        return Check(
+            passed=False,
+            detail="platformio not found",
+            fix="Run `nff install-deps` to install PlatformIO",
+        )
+    arduino = check_arduino_cli()
+    return Check(passed=arduino.passed, detail=f"arduino-cli · {arduino.detail}",
+                 fix=arduino.fix, optional=arduino.optional)
+
+
 def check_esptool() -> Check:
     ver = toolchain.esptool_version()
     if ver:
@@ -135,11 +153,16 @@ def doctor():
     """Check that all nff dependencies are installed and configured."""
     checks = [
         ("Python", check_python()),
-        ("arduino-cli", check_arduino_cli()),
+        ("Build backend", check_build_backend()),
         ("esptool", check_esptool()),
         ("pyserial", check_pyserial()),
         ("Config", check_config()),
-        ("nff lib", check_lib_sync()),
+    ]
+    # The flattened nff Arduino library is an arduino-cli concept; the platformio
+    # backend materialises the SDK per-project, so this check only applies there.
+    if toolchain.active_backend() == "arduino":
+        checks.append(("nff lib", check_lib_sync()))
+    checks += [
         ("Device", check_device()),
         ("Claude Desktop", check_claude_desktop()),
     ]

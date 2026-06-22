@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Optional
 
 from nff import config
+from nff.tools import boards as boards_module
 from nff.tools import toolchain
 
 FQBN_TO_CHIP: dict[str, str] = {
@@ -42,10 +43,12 @@ def _resolve_token() -> Optional[str]:
     return config.get_wokwi_config().get("api_token")
 
 
-def generate_diagram(fqbn: str) -> dict:
-    chip = FQBN_TO_CHIP.get(fqbn)
+def generate_diagram(board: str) -> dict:
+    """Build a minimal diagram.json for a board. ``board`` may be an arduino-cli
+    FQBN (e.g. ``esp32:esp32:esp32``) or a PlatformIO board id (e.g. ``esp32dev``)."""
+    chip = FQBN_TO_CHIP.get(board) or boards_module.wokwi_chip_for(board)
     if chip is None:
-        raise WokwiError(f"Unsupported board FQBN: {fqbn}")
+        raise WokwiError(f"Unsupported board for simulation: {board}")
     return {
         "version": 1,
         "author": "nff",

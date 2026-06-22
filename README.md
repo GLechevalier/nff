@@ -4,7 +4,7 @@ nff is an MCP server that gives LLMs direct control over physical hardware — o
 
 Connect your board over USB and Claude writes, compiles, flashes, and reads serial output autonomously. Deploy devices with the `nff-sdk-c` library and Claude can reach them remotely: capture crash state, diagnose failures, and push fixes — without physical access.
 
-> **nff is the open-source bench CLI of the [nff platform](../README.md)** — an end-to-end, agent-driven system for developing, shipping, and operating ESP32-class firmware (bench → OTA → fleet diagnosis). This repo (`nff`) and the device library (`nff-sdk-c`) are the two **MIT-licensed** pieces that run on the engineer's laptop and hardware; the hosted backend (fleet broker, OTA orchestration, crash-analysis engine) is proprietary. See the [root README](../README.md) for the full picture.
+> **nff is the open-source bench CLI of the [nff platform](https://nanoforgeflow.com)** — an end-to-end, agent-driven system for developing, shipping, and operating ESP32-class firmware (bench → OTA → fleet diagnosis). This repo (`nff`) and the device library (`nff-sdk-c`) are the two **MIT-licensed** pieces that run on the engineer's laptop and hardware; the hosted backend (fleet broker, OTA orchestration, crash-analysis engine) is proprietary.
 
 ```
 you: "Run the sensor init sequence and assert the calibration values over serial"
@@ -14,8 +14,7 @@ you: "Why did the unit in the field just hard-fault?"
 LLM: [captures panic over OTA] → [reads registers + backtrace] → "Stack overflow in your sensor ISR at line 47"
 ```
 
-**Supported boards:** ESP32 (CP210x / CH340) · ESP8266 (FTDI) · Arduino AVR (Uno, Mega, Nano, Leonardo)  
-STM32 and RP2040 support in progress — open a PR, adding a board is [two lines of code](CONTRIBUTING.md#adding-a-new-board).
+**Supported boards:** with the **PlatformIO backend** (now the default in the Python implementation) nff is board-universal — any of PlatformIO's ~1000 boards (every ESP32 variant, RP2040/Pico, STM32, classic AVR, …), with the platform toolchain auto-installed on first build. The classic **arduino-cli backend** remains available and covers ESP32 (CP210x / CH340) · ESP8266 (FTDI) · Arduino AVR (Uno, Mega, Nano, Leonardo). See [Build backends](#build-backends).
 
 **Shipped as a single Rust binary.** The release artifact is the compiled `nff` binary built from `nff-rs/` — a self-contained executable with no Python runtime required. The Python package under `nff/nff/` remains as the reference/prototyping implementation (features are often prototyped there first, then ported to Rust at parity); both are kept in sync, version for version. The Rust port is at full feature parity (CLI commands, MCP server + OAuth proxy, the bench-loop hardening, and the `nff pi` Raspberry-Pi probe).
 
@@ -58,6 +57,35 @@ nff closes the edit–compile–flash–debug loop. Instead of switching between
 Once a device is deployed, nff becomes your remote window into it. When a bare-metal MCU crashes in the field there is no shell, no SSH, no process table — just a panic on a chip you cannot physically touch. nff captures the crash state (registers, stack, memory, backtrace) and routes it to a cloud AI agent that explains the failure in plain language and drives the recovery. No truck roll. No JTAG probe on-site.
 
 This is the gap Mender, balena, and similar OTA tools cannot fill: they require a living network client running inside the firmware. nff's field mode works precisely when the firmware is dead.
+
+---
+
+## Build backends
+
+nff can drive the build/flash loop through either of two toolchains, selected per-run or persisted in config. Every `compile`/`flash` path resolves the backend the same way, so the CLI and MCP tools are identical regardless of which one is active.
+
+| Backend | Boards | Toolchain | Sketch layout |
+|---|---|---|---|
+| **`platformio`** (default) | board-universal — any [PlatformIO board id](https://docs.platformio.org/en/latest/boards/index.html) (`esp32dev`, `esp32-s3-devkitc-1`, `pico`, `genericSTM32F103C8`, `uno`, …) | PlatformIO Core; the platform + framework + esptool **auto-install on first build** per board family | native `src/main.cpp` + a generated `platformio.ini` |
+| **`arduino`** | the [Supported Boards](#supported-boards) table (FQBN) | arduino-cli + manually installed cores | `.ino` sketch folder |
+
+**Selecting a backend** — precedence is env var → config → default (`platformio`):
+
+```bash
+# per-run override (config untouched)
+NFF_BUILD_BACKEND=platformio  nff compile sketches/esp32_vitals --board esp32dev
+NFF_BUILD_BACKEND=arduino     nff compile sketches/esp32_vitals --board esp32:esp32:esp32
+
+# persist a choice (writes build.backend + build.board to ~/.nff/config.json)
+nff init --backend platformio     # → no flags needed afterwards
+nff init --backend arduino        # opt back into arduino-cli
+```
+
+`--board` is backend-aware: a **PlatformIO board id** under the pio backend, an **arduino-cli FQBN** under the arduino backend. With a board saved via `nff init` you can omit `--board` entirely.
+
+> **Status:** the PlatformIO backend currently lives in the **Python implementation** (`nff/nff/`), where it is the default. The shipped Rust binary (`nff-rs/`) still builds via arduino-cli — the PlatformIO port is in progress. Cloud onboarding (`nff init` → claim a device to the fleet) also still runs on the arduino backend; `nff init --backend platformio` configures local builds and skips that step.
+
+📄 Full write-up — architecture, internals, requirements, and verification — in [`docs/platformio-backend.md`](docs/platformio-backend.md).
 
 ---
 
@@ -140,14 +168,18 @@ Pure-Python install (requires Python ≥ 3.10) — no compiler or Rust toolchain
 
 ### 2. Install board cores
 
+On the **default PlatformIO backend** there is nothing to install here — PlatformIO Core is set up by `nff init`, and the platform/framework/esptool for your board auto-install on the first build. Just make sure your sketch names a PlatformIO board id (`--board esp32dev`, etc.).
+
+Only on the **arduino backend** do you install cores manually:
+
 ```bash
-# Install the cores you need
+# arduino backend only — install the cores you need
 arduino-cli core install esp32:esp32
 arduino-cli core install arduino:avr
 arduino-cli core install esp8266:esp8266
 ```
 
-> **arduino-cli** is auto-installed by `nff init` if it is not already on your PATH.
+> Both toolchains (`platformio` / `arduino-cli`) are auto-installed by `nff init`/`nff install-deps` for the active backend if not already present.
 
 ### 3. Plug in your board and run init
 
@@ -196,8 +228,9 @@ nff doctor
 
 ```bash
 nff flash sketches/sensor_init
-nff flash sketches/sensor_init --board esp32:esp32:esp32 --port COM3
-nff flash sketches/sensor_init --manual-reset    # for boards without auto-reset
+nff flash sketches/sensor_init --board esp32dev --port COM3   # PlatformIO board id (default backend)
+nff flash sketches/sensor_init --board esp32:esp32:esp32      # arduino FQBN (NFF_BUILD_BACKEND=arduino)
+nff flash sketches/sensor_init --manual-reset                 # for boards without auto-reset
 nff monitor --port COM10 --baud 115200
 nff monitor --port COM10 --baud 115200 --timeout 15
 ```
@@ -239,17 +272,37 @@ Useful flags:
 
 ## Supported Boards
 
-| Board | Vendor ID | Product ID | FQBN |
-|---|---|---|---|
-| ESP32 (CP210x) | 10c4 | ea60 | `esp32:esp32:esp32` |
-| ESP32 (CH340) | 1a86 | 7523 | `esp32:esp32:esp32` |
-| ESP8266 (FTDI) | 0403 | 6001 | `esp8266:esp8266:generic` |
-| Arduino Uno | 2341 | 0043 | `arduino:avr:uno` |
-| Arduino Mega 2560 | 2341 | 0010 | `arduino:avr:mega` |
-| Arduino Leonardo | 2341 | 0036 | `arduino:avr:leonardo` |
-| Arduino Nano | 2341 | 0058 | `arduino:avr:nano` |
+**On the default PlatformIO backend, nff is board-universal.** Pass any of PlatformIO's [~1000 board ids](https://docs.platformio.org/en/latest/boards/index.html) to `--board` and the matching platform toolchain (compiler + framework + uploader) installs itself on first build — there is no fixed allow-list and nothing to pre-install.
 
-Board not listed? Open a PR — adding one is [two lines of code](CONTRIBUTING.md#adding-a-new-board).
+### Curated families
+
+These are the board ids in nff's built-in catalog. The catalog only supplies sensible defaults (PlatformIO platform + Wokwi sim chip) so you can name a short board id and `nff init` can auto-detect — **boards outside it still build**, you just pass the full PlatformIO id.
+
+| Family | PlatformIO platform | Example `--board` ids | Wokwi sim |
+|---|---|---|---|
+| **ESP32** | `espressif32` | `esp32dev`, `esp32-s3-devkitc-1`, `esp32-c3-devkitm-1`, `esp32-c6-devkitc-1`, `esp32-s2-saola-1` | ✅ (S2: ❌) |
+| **ESP8266** | `espressif8266` | `esp01_1m`, `nodemcuv2` | ✅ |
+| **RP2040 / Pico** | `raspberrypi` | `pico`, `rpipicow` | ✅ |
+| **STM32** | `ststm32` | `genericSTM32F103C8`, `bluepill_f103c8`, `nucleo_f401re` | ❌ |
+| **Classic AVR** | `atmelavr` | `uno`, `megaatmega2560`, `nanoatmega328`, `leonardo` | ✅ |
+
+Need another board (Teensy, SAMD, nRF52, ESP32-P4, …)? Just give its PlatformIO id — e.g. `nff compile sketch.ino --board teensy41`. Add it to the catalog (for auto-detect + a short default) in a PR — it's [two lines of code](CONTRIBUTING.md#adding-a-new-board).
+
+### USB auto-detect
+
+When you plug a board in, nff resolves it by USB vendor/product ID to a default board id for **both** backends, so `nff init` and `--board`-less commands "just work". A USB-serial chip (CP210x/CH340/FTDI) is shared by many boards, so this is a *default* you can override with `--board`.
+
+| Board | Vendor ID | Product ID | FQBN (arduino) | PlatformIO board id |
+|---|---|---|---|---|
+| ESP32 (CP210x) | 10c4 | ea60 | `esp32:esp32:esp32` | `esp32dev` |
+| ESP32 (CH340) | 1a86 | 7523 | `esp32:esp32:esp32` | `esp32dev` |
+| ESP8266 (FTDI) | 0403 | 6001 | `esp8266:esp8266:generic` | `esp01_1m` |
+| Arduino Uno | 2341 | 0043 | `arduino:avr:uno` | `uno` |
+| Arduino Mega 2560 | 2341 | 0010 | `arduino:avr:mega` | `megaatmega2560` |
+| Arduino Leonardo | 2341 | 0036 | `arduino:avr:leonardo` | `leonardo` |
+| Arduino Nano | 2341 | 0058 | `arduino:avr:nano` | `nanoatmega328` |
+
+> The **arduino backend** (`NFF_BUILD_BACKEND=arduino`) is limited to the FQBN column above plus whatever cores you `arduino-cli core install`. The PlatformIO backend is the one that makes the rest of the families above available.
 
 ---
 
@@ -266,6 +319,10 @@ Board not listed? Open a PR — adding one is [two lines of code](CONTRIBUTING.m
     "fqbn": "esp32:esp32:esp32",
     "baud": 115200
   },
+  "build": {
+    "backend": "platformio",
+    "board": "esp32dev"
+  },
   "wokwi": {
     "api_token": "YOUR_TOKEN",
     "default_timeout_ms": 5000,
@@ -274,7 +331,7 @@ Board not listed? Open a PR — adding one is [two lines of code](CONTRIBUTING.m
 }
 ```
 
-The Wokwi token can also be set via `WOKWI_CLI_TOKEN` (takes precedence over config).
+`build.backend` selects the toolchain (`platformio` default, or `arduino`) and `build.board` holds the PlatformIO board id; the arduino backend uses `default_device.fqbn` instead. The `NFF_BUILD_BACKEND` env var overrides `build.backend` per-run. The Wokwi token can also be set via `WOKWI_CLI_TOKEN` (takes precedence over config).
 
 ---
 
@@ -320,9 +377,11 @@ nff/
 │   │   ├── mcp_cmd.py
 │   │   └── wokwi_cmd.py
 │   ├── tools/
-│   │   ├── boards.py            # USB vendor/product ID detection
+│   │   ├── boards.py            # USB ID detection + PlatformIO board catalog
 │   │   ├── serial.py            # serial read/write/stream/reset
-│   │   ├── toolchain.py         # arduino-cli + esptool subprocess wrappers
+│   │   ├── toolchain.py         # backend dispatcher + arduino-cli/esptool wrappers
+│   │   ├── backends/
+│   │   │   └── platformio.py    # PlatformIO backend (project scaffold, pio run)
 │   │   ├── installer.py         # arduino-cli auto-install
 │   │   ├── auth.py              # diagnosis-server token handling
 │   │   └── wokwi.py             # Wokwi runner + diagram generation
@@ -359,11 +418,13 @@ sudo usermod -aG dialout $USER
 Get a free CI token at https://wokwi.com/dashboard/ci, then:
 
 ```bash
-nff wokwi init --board esp32:esp32:esp32 --token YOUR_TOKEN
-nff flash --sim sketches/my_sketch --board esp32:esp32:esp32
+nff wokwi init --board esp32dev --token YOUR_TOKEN
+nff flash --sim sketches/my_sketch --board esp32dev
 nff wokwi run              # headless
 nff wokwi run --gui        # visual simulation in VS Code
 ```
+
+(Use the arduino FQBN form — `--board esp32:esp32:esp32` — when running under `NFF_BUILD_BACKEND=arduino`.)
 
 Install the [Wokwi VS Code extension](https://marketplace.visualstudio.com/items?itemName=wokwi.wokwi-vscode) for the animated circuit view.
 
