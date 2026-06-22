@@ -107,9 +107,93 @@ def test_run_raises_toolchain_error_on_missing_exe():
         _run(["nonexistent_binary_xyz_abc_123"])
 
 
-def test_run_raises_toolchain_error_on_timeout():
-    with pytest.raises(ToolchainError, match="timed out"):
-        _run([sys.executable, "-c", "import time; time.sleep(10)"], timeout=1)
+def test_run_returns_failed_result_on_timeout():
+    # A timeout is transient; _run reports it as a failed RunResult (rc=124) so
+    # the retry layer can classify and retry it, rather than raising.
+    result = _run([sys.executable, "-c", "import time; time.sleep(10)"], timeout=1)
+    assert not result.success
+    assert result.returncode == 124
+    assert "timed out" in result.output
+
+
+def test_compile_sketch_forwards_compile_timeout(tmp_path, monkeypatch):
+    import nff.tools.toolchain as tc
+    monkeypatch.setattr(tc, "find_arduino_cli", lambda: "/fake/cli")
+    captured = {}
+
+    def fake_run(cmd, timeout=tc._RUN_TIMEOUT):
+        captured["timeout"] = timeout
+        return RunResult(success=True, stdout="", stderr="", returncode=0)
+
+    monkeypatch.setattr(tc, "_run", fake_run)
+    tc.compile_sketch(tmp_path, "esp32:esp32:esp32")
+    assert captured["timeout"] == tc._COMPILE_TIMEOUT
+
+
+def test_compile_sketch_retries_transient_then_succeeds(tmp_path, monkeypatch):
+    import nff.tools.toolchain as tc
+    monkeypatch.setattr(tc, "find_arduino_cli", lambda: "/fake/cli")
+    monkeypatch.setattr(tc._retry.time, "sleep", lambda _s: None)
+    results = [
+        RunResult(success=False, stdout="", stderr="Invalid argument", returncode=1),
+        RunResult(success=True, stdout="ok", stderr="", returncode=0),
+    ]
+    calls = {"n": 0}
+
+    def fake_run(cmd, timeout=tc._RUN_TIMEOUT):
+        r = results[calls["n"]]
+        calls["n"] += 1
+        return r
+
+    monkeypatch.setattr(tc, "_run", fake_run)
+    out = tc.compile_sketch(tmp_path, "esp32:esp32:esp32")
+    assert out.success
+    assert calls["n"] == 2
+
+
+def test_compile_sketch_does_not_retry_compile_error(tmp_path, monkeypatch):
+    import nff.tools.toolchain as tc
+    monkeypatch.setattr(tc, "find_arduino_cli", lambda: "/fake/cli")
+    monkeypatch.setattr(tc._retry.time, "sleep", lambda _s: None)
+    calls = {"n": 0}
+
+    def fake_run(cmd, timeout=tc._RUN_TIMEOUT):
+        calls["n"] += 1
+        return RunResult(success=False, stdout="sketch.ino: error: expected ';'",
+                         stderr="", returncode=1)
+
+    monkeypatch.setattr(tc, "_run", fake_run)
+    out = tc.compile_sketch(tmp_path, "esp32:esp32:esp32")
+    assert not out.success
+    assert calls["n"] == 1  # genuine compile error fails fast
+
+
+def test_stream_with_retry_retries_transient(monkeypatch):
+    import nff.tools.toolchain as tc
+
+    class _FakeStream:
+        def __init__(self, lines, rc):
+            self._lines, self.returncode = lines, rc
+        def __iter__(self):
+            yield from self._lines
+
+    streams = [
+        _FakeStream(["Invalid argument"], 1),
+        _FakeStream(["uploading", "done"], 0),
+    ]
+    made = {"n": 0}
+
+    def make_stream():
+        s = streams[made["n"]]
+        made["n"] += 1
+        return s
+
+    monkeypatch.setattr(tc._retry.time, "sleep", lambda _s: None)
+    emitted = []
+    rc = tc.stream_with_retry(make_stream, emitted.append)
+    assert rc == 0
+    assert made["n"] == 2
+    assert any("retrying" in line for line in emitted)
 
 
 # ---------------------------------------------------------------------------

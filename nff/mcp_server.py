@@ -16,6 +16,7 @@ from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from mcp.types import TextContent, Tool
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+import nff.tools.arduino_lib as arduino_lib
 import nff.tools.boards as boards_module
 import nff.tools.serial as serial_module
 import nff.tools.toolchain as toolchain
@@ -114,12 +115,18 @@ async def flash(
         fqbn, resolved_port = _resolve_fqbn_and_port(board, port)
     except ValueError as exc:
         return f"ERROR: {exc}"
-    return toolchain.flash(
+    result = toolchain.flash(
         code=code,
         fqbn=fqbn,
         port=resolved_port,
         source=Path(sketch) if sketch else None,
     )
+    # Non-blocking: prepend a stale-lib warning so an agent never assumes a
+    # local SDK edit shipped when it actually built the stale synced library.
+    warn = arduino_lib.local_sdk_newer_than_synced()
+    if warn:
+        return f"warning: {warn}\n{result}"
+    return result
 
 
 async def serial_read(

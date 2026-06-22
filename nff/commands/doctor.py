@@ -11,7 +11,7 @@ import serial
 
 import nff.tools.boards as boards_module
 from nff import config
-from nff.tools import toolchain
+from nff.tools import arduino_lib, toolchain
 
 _CLAUDE_DESKTOP_CONFIG = Path.home() / ".claude" / "claude_desktop_config.json"
 
@@ -94,6 +94,27 @@ def check_device() -> Check:
                      fix="Close other applications using the serial port")
 
 
+def check_lib_sync() -> Check:
+    """Informational: is the nff Arduino library synced, and is it stale vs a
+    local nff-sdk-c checkout? Optional so it never flips the doctor exit code."""
+    fields = arduino_lib.read_sync_meta()
+    if not fields:
+        return Check(
+            passed=False,
+            detail="nff Arduino library not synced",
+            fix="Run `nff install-deps` (or `nff init`)",
+            optional=True,
+        )
+    detail = (
+        f"nff lib {fields.get('version', '?')} synced {fields.get('synced_at', '?')}"
+    )
+    warn = arduino_lib.local_sdk_newer_than_synced()
+    if warn:
+        return Check(passed=False, detail=f"{detail} — {warn}",
+                     fix="Re-sync the nff library", optional=True)
+    return Check(passed=True, detail=detail)
+
+
 def check_claude_desktop() -> Check:
     path = _CLAUDE_DESKTOP_CONFIG
     if not path.exists():
@@ -118,6 +139,7 @@ def doctor():
         ("esptool", check_esptool()),
         ("pyserial", check_pyserial()),
         ("Config", check_config()),
+        ("nff lib", check_lib_sync()),
         ("Device", check_device()),
         ("Claude Desktop", check_claude_desktop()),
     ]

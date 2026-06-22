@@ -15,8 +15,10 @@ excluded so the Arduino build never tries to compile a non-Arduino port.
 
 from __future__ import annotations
 
+import datetime
 import io
 import os
+import re
 import shutil
 import tarfile
 import tempfile
@@ -118,8 +120,15 @@ def flatten_sdk(repo_root: Path, dest: Path) -> Path:
 
     # Library manifest + a marker so we (and arduino-cli) can see what was synced.
     _copy(lib_props, dest / "library.properties")
+    m = re.search(r"^version=(.+)$", lib_props.read_text(encoding="utf-8"), re.M)
+    version = m.group(1).strip() if m else "unknown"
+    synced_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
     (dest / ".nff_sync_meta").write_text(
-        f"synced_from={_tarball_url()}\nports=esp32_arduino_only\n", encoding="utf-8"
+        f"synced_from={_tarball_url()}\n"
+        f"version={version}\n"
+        f"synced_at={synced_at}\n"
+        f"ports=esp32_arduino_only\n",
+        encoding="utf-8",
     )
     return dest
 
@@ -163,3 +172,74 @@ def install_nff_library(emit: Optional[Emit] = None) -> Path:
         flatten_sdk(repo_root, dest)
     emit(f"installed nff library -> {dest}")
     return dest
+
+
+# ---------------------------------------------------------------------------
+# Staleness detection — warn when a local SDK source is newer than what's synced
+# ---------------------------------------------------------------------------
+
+_SDK_SRC_EXTS = {".c", ".h", ".cpp"}
+
+
+def read_sync_meta() -> dict[str, str]:
+    """Parse the installed library's ``.nff_sync_meta`` into a dict (empty if absent)."""
+    meta = resolve_lib_dir() / ".nff_sync_meta"
+    if not meta.exists():
+        return {}
+    fields: dict[str, str] = {}
+    for line in meta.read_text(encoding="utf-8").splitlines():
+        if "=" in line:
+            k, v = line.split("=", 1)
+            fields[k.strip()] = v.strip()
+    return fields
+
+
+def _detect_local_sdk_src() -> Optional[Path]:
+    """A local nff-sdk-c source tree, if the developer has one checked out.
+
+    Honours ``NFF_SDK_C_SRC`` first, then walks up from the cwd looking for a
+    sibling ``nff-sdk-c/`` with the expected layout. Returns None for plain pip
+    users (no local checkout), so the staleness warning never fires for them.
+    """
+    env = os.environ.get("NFF_SDK_C_SRC")
+    if env and (Path(env) / "library.properties").exists():
+        return Path(env)
+    for base in [Path.cwd(), *Path.cwd().parents]:
+        cand = base / "nff-sdk-c"
+        if (cand / "library.properties").exists() and (cand / "src").is_dir():
+            return cand
+    return None
+
+
+def local_sdk_newer_than_synced() -> Optional[str]:
+    """Return a human-readable warning if a detected local nff-sdk-c source is
+    newer than the installed Arduino library, else None. Never raises.
+
+    This catches the footgun where a developer edits ``nff-sdk-c/src`` and then
+    flashes the *stale* synced library, silently shipping old code.
+    """
+    try:
+        src = _detect_local_sdk_src()
+        if not src:
+            return None
+        meta = resolve_lib_dir() / ".nff_sync_meta"
+        if not meta.exists():
+            return None
+        synced_mtime = meta.stat().st_mtime
+        newest = max(
+            (
+                p.stat().st_mtime
+                for p in src.rglob("*")
+                if p.is_file() and p.suffix in _SDK_SRC_EXTS
+            ),
+            default=0.0,
+        )
+        if newest > synced_mtime:
+            return (
+                f"local nff-sdk-c at {src} has edits newer than the synced "
+                f"Arduino library — run `python {src / 'tools' / 'sync_arduino_lib.py'}` "
+                f"before flashing"
+            )
+    except Exception:
+        return None
+    return None

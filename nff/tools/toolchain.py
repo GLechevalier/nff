@@ -7,9 +7,17 @@ import sys
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterator, Optional
+from typing import Callable, Iterator, Optional, Tuple
+
+from nff.tools import retry as _retry
 
 _SKETCH_DIR = Path(tempfile.gettempdir()) / "nff_sketch"
+
+# Command timeouts (seconds). The generic _RUN_TIMEOUT covers short commands;
+# a cold ESP32 first build easily exceeds 120s, so compile gets its own ceiling.
+_RUN_TIMEOUT = 120
+_COMPILE_TIMEOUT = 600
+_UPLOAD_TIMEOUT = 180
 
 
 class ToolchainError(Exception):
@@ -193,7 +201,7 @@ def _require_arduino_cli() -> str:
     return cli
 
 
-def _run(cmd: list[str], timeout: int = 120) -> RunResult:
+def _run(cmd: list[str], timeout: int = _RUN_TIMEOUT) -> RunResult:
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
         return RunResult(
@@ -203,9 +211,19 @@ def _run(cmd: list[str], timeout: int = 120) -> RunResult:
             returncode=r.returncode,
         )
     except FileNotFoundError:
+        # A missing binary is never transient — fail hard, never retry.
         raise ToolchainError(f"Executable not found: {cmd[0]}")
-    except subprocess.TimeoutExpired:
-        raise ToolchainError(f"Command timed out: {cmd[0]}")
+    except subprocess.TimeoutExpired as exc:
+        # Surface a timeout as a failed RunResult (not a raise) so the retry
+        # layer can classify it as transient and try again. rc=124 mirrors the
+        # shell timeout convention.
+        partial = (exc.stdout or "") if isinstance(exc.stdout, str) else ""
+        return RunResult(
+            success=False,
+            stdout=partial,
+            stderr=f"Command timed out after {timeout}s: {cmd[0]}",
+            returncode=124,
+        )
 
 
 def run_arduino_cli(args: list[str], timeout: int = 300) -> RunResult:
@@ -348,8 +366,10 @@ def compile_sketch(sketch_dir: Path, fqbn: str) -> RunResult:
     cli = _require_arduino_cli()
     build_path = _build_dir(sketch_dir, fqbn)
     build_path.mkdir(parents=True, exist_ok=True)
-    return _run([cli, "compile", "--fqbn", fqbn, *_fqbn_build_property(fqbn),
-                 "--build-path", str(build_path), str(sketch_dir)])
+    cmd = [cli, "compile", "--fqbn", fqbn, *_fqbn_build_property(fqbn),
+           "--build-path", str(build_path), str(sketch_dir)]
+    # Retry transient toolchain hiccups; a genuine compile error fails fast.
+    return _retry.run_with_retry(lambda: _run(cmd, timeout=_COMPILE_TIMEOUT))
 
 
 def upload_sketch(sketch_dir: Path, fqbn: str, port: str) -> RunResult:
@@ -360,7 +380,10 @@ def upload_sketch(sketch_dir: Path, fqbn: str, port: str) -> RunResult:
     if build_path.exists():
         cmd += ["--input-dir", str(build_path)]
     cmd.append(str(sketch_dir))
-    return _run(cmd)
+    # Longer backoff: the board re-enumerates after arduino-cli's auto-reset.
+    return _retry.run_with_retry(
+        lambda: _run(cmd, timeout=_UPLOAD_TIMEOUT), backoff=(2.0, 4.0)
+    )
 
 
 def stream_compile(sketch_dir: Path, fqbn: str) -> ProcessStream:
@@ -379,6 +402,35 @@ def stream_upload(sketch_dir: Path, fqbn: str, port: str) -> ProcessStream:
         cmd += ["--input-dir", str(build_path)]
     cmd.append(str(sketch_dir))
     return ProcessStream(cmd)
+
+
+def run_stream_attempt(
+    stream: ProcessStream, emit: Callable[[str], None]
+) -> Tuple[int, str]:
+    """Consume one ProcessStream, echoing each line live, and return
+    ``(returncode, captured_output)`` so a retry layer can classify the result."""
+    captured: list[str] = []
+    for line in stream:
+        emit(line)
+        captured.append(line)
+    return (stream.returncode or 0), "\n".join(captured)
+
+
+def stream_with_retry(
+    make_stream: Callable[[], ProcessStream],
+    emit: Callable[[str], None],
+    *,
+    backoff: Tuple[float, ...] = _retry.DEFAULT_BACKOFF,
+) -> int:
+    """Run a live-streaming arduino-cli command with transient-failure retry.
+
+    ``make_stream`` builds a fresh ProcessStream per attempt (a stream is
+    single-use). Output is echoed live via ``emit``; a transient non-zero result
+    is retried after a banner. Returns the final returncode.
+    """
+    return _retry.stream_with_retry(
+        make_stream, emit, run_stream_attempt, backoff=backoff
+    )
 
 
 def compile_only(

@@ -7,7 +7,12 @@ import click
 from rich.console import Console
 
 from nff import config
-from nff.tools import boards as boards_module, toolchain, wokwi as wokwi_module
+from nff.tools import (
+    arduino_lib,
+    boards as boards_module,
+    toolchain,
+    wokwi as wokwi_module,
+)
 
 console = Console()
 
@@ -67,17 +72,25 @@ def flash(file, board, port, baud, manual_reset, sim, sim_timeout):
     if manual_reset:
         click.pause("Press Enter after manually resetting the board…")
 
+    # Non-blocking: warn if a local nff-sdk-c checkout is newer than the synced
+    # Arduino library, so "flash to test the fix" never silently builds old code.
+    warn = arduino_lib.local_sdk_newer_than_synced()
+    if warn:
+        console.print(f"[yellow]warning:[/yellow] {warn}")
+
     console.print("[bold]Compiling…[/bold]")
-    compile_stream = toolchain.stream_compile(sketch_dir, fqbn)
-    for line in compile_stream:
-        click.echo(line)
-    if compile_stream.returncode and compile_stream.returncode != 0:
+    rc = toolchain.stream_with_retry(
+        lambda: toolchain.stream_compile(sketch_dir, fqbn), click.echo
+    )
+    if rc != 0:
         raise click.ClickException("Compile failed")
 
     console.print("[bold]Uploading…[/bold]")
-    upload_stream = toolchain.stream_upload(sketch_dir, fqbn, resolved_port)
-    for line in upload_stream:
-        click.echo(line)
-    if upload_stream.returncode and upload_stream.returncode != 0:
+    rc = toolchain.stream_with_retry(
+        lambda: toolchain.stream_upload(sketch_dir, fqbn, resolved_port),
+        click.echo,
+        backoff=(2.0, 4.0),
+    )
+    if rc != 0:
         raise click.ClickException("Upload failed")
     console.print("[green]Flash complete[/green]")

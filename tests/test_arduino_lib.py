@@ -86,6 +86,85 @@ def test_flatten_sdk_raises_on_missing_files(tmp_path):
         arduino_lib.flatten_sdk(repo, tmp_path / "lib")
 
 
+def test_flatten_sdk_writes_version_and_timestamp(tmp_path):
+    repo = _make_sdk_tree(tmp_path / "repo")
+    (repo / "library.properties").write_text("name=nff\nversion=1.2.3\n", encoding="utf-8")
+    dest = tmp_path / "lib"
+
+    arduino_lib.flatten_sdk(repo, dest)
+
+    meta = (dest / ".nff_sync_meta").read_text(encoding="utf-8")
+    assert "version=1.2.3" in meta
+    assert "synced_at=" in meta
+
+
+# ---------------------------------------------------------------------------
+# staleness detection
+# ---------------------------------------------------------------------------
+
+def test_read_sync_meta_parses_fields(tmp_path, monkeypatch):
+    lib = tmp_path / "nff"
+    lib.mkdir()
+    (lib / ".nff_sync_meta").write_text("version=9.9\nports=esp32_arduino_only\n",
+                                        encoding="utf-8")
+    monkeypatch.setattr(arduino_lib, "resolve_lib_dir", lambda: lib)
+    fields = arduino_lib.read_sync_meta()
+    assert fields["version"] == "9.9"
+
+
+def test_read_sync_meta_empty_when_absent(tmp_path, monkeypatch):
+    monkeypatch.setattr(arduino_lib, "resolve_lib_dir", lambda: tmp_path / "nope")
+    assert arduino_lib.read_sync_meta() == {}
+
+
+def test_local_sdk_newer_than_synced_warns(tmp_path, monkeypatch):
+    import os
+    lib = tmp_path / "lib"
+    lib.mkdir()
+    meta = lib / ".nff_sync_meta"
+    meta.write_text("version=1\n", encoding="utf-8")
+    # Make the marker old.
+    os.utime(meta, (1000, 1000))
+
+    src = tmp_path / "nff-sdk-c"
+    (src / "src").mkdir(parents=True)
+    (src / "library.properties").write_text("name=nff\n", encoding="utf-8")
+    edited = src / "src" / "nff_core.c"
+    edited.write_text("// edited\n", encoding="utf-8")  # mtime = now, newer
+
+    monkeypatch.setattr(arduino_lib, "resolve_lib_dir", lambda: lib)
+    monkeypatch.setattr(arduino_lib, "_detect_local_sdk_src", lambda: src)
+
+    warn = arduino_lib.local_sdk_newer_than_synced()
+    assert warn and "newer" in warn
+
+
+def test_local_sdk_newer_than_synced_clean_when_synced_after_edit(tmp_path, monkeypatch):
+    import os
+    lib = tmp_path / "lib"
+    lib.mkdir()
+    meta = lib / ".nff_sync_meta"
+    meta.write_text("version=1\n", encoding="utf-8")
+
+    src = tmp_path / "nff-sdk-c"
+    (src / "src").mkdir(parents=True)
+    (src / "library.properties").write_text("name=nff\n", encoding="utf-8")
+    edited = src / "src" / "nff_core.c"
+    edited.write_text("// edited\n", encoding="utf-8")
+    os.utime(edited, (1000, 1000))  # source older than the marker
+
+    monkeypatch.setattr(arduino_lib, "resolve_lib_dir", lambda: lib)
+    monkeypatch.setattr(arduino_lib, "_detect_local_sdk_src", lambda: src)
+
+    assert arduino_lib.local_sdk_newer_than_synced() is None
+
+
+def test_local_sdk_newer_than_synced_none_for_pip_user(tmp_path, monkeypatch):
+    # No local SDK checkout detected => never warns (pip users see no noise).
+    monkeypatch.setattr(arduino_lib, "_detect_local_sdk_src", lambda: None)
+    assert arduino_lib.local_sdk_newer_than_synced() is None
+
+
 # ---------------------------------------------------------------------------
 # resolve_lib_dir
 # ---------------------------------------------------------------------------

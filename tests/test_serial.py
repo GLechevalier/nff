@@ -233,3 +233,48 @@ def test_stream_lines_stops_at_timeout():
     elapsed = time.monotonic() - start
 
     assert elapsed < 1.0, "stream_lines did not respect timeout"
+
+
+def test_stream_lines_yields_error_on_open_failure():
+    import serial
+    with patch("serial.Serial", side_effect=serial.SerialException("Port doesn't exist")):
+        out = list(stream_lines("COM99", 115200, timeout_s=0.1))
+    assert out == ["ERROR: Port doesn't exist"]
+
+
+# ---------------------------------------------------------------------------
+# transient retry
+# ---------------------------------------------------------------------------
+
+def test_serial_read_retries_transient_then_succeeds(monkeypatch):
+    import serial
+    monkeypatch.setattr("nff.tools.serial.time.sleep", lambda _s: None)
+    good = _make_serial_mock()
+    good.in_waiting = 7
+    good.read.side_effect = chain([b"PONG\n"], repeat(b""))
+    seq = iter([serial.SerialException("Invalid argument"), good])
+
+    def factory(*a, **kw):
+        item = next(seq)
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+    with patch("serial.Serial", side_effect=factory):
+        result = serial_read(duration_ms=50, port="COM10", baud=115200)
+    assert "PONG" in result
+
+
+def test_serial_read_non_transient_fails_fast(monkeypatch):
+    import serial
+    calls = {"n": 0}
+
+    def factory(*a, **kw):
+        calls["n"] += 1
+        raise serial.SerialException("no such device")
+
+    monkeypatch.setattr("nff.tools.serial.time.sleep", lambda _s: None)
+    with patch("serial.Serial", side_effect=factory):
+        result = serial_read(duration_ms=50, port="COM99", baud=9600)
+    assert result.startswith("ERROR:")
+    assert calls["n"] == 1  # non-transient => no retry
