@@ -8,13 +8,13 @@ const BASE: &str = "https://downloads.arduino.cc/arduino-cli/arduino-cli_latest"
 fn asset_url() -> (&'static str, &'static str) {
     match (OS, ARCH) {
         ("windows", "x86_64") => ("_Windows_64bit.zip", "zip"),
-        ("windows", _)        => ("_Windows_32bit.zip", "zip"),
-        ("macos", "aarch64")  => ("_macOS_ARM64.tar.gz", "tar.gz"),
-        ("macos", _)          => ("_macOS_64bit.tar.gz", "tar.gz"),
-        ("linux", "x86_64")   => ("_Linux_64bit.tar.gz", "tar.gz"),
-        ("linux", "aarch64")  => ("_Linux_ARM64.tar.gz", "tar.gz"),
-        ("linux", "arm")      => ("_Linux_ARMv7.tar.gz", "tar.gz"),
-        _                     => ("_Linux_64bit.tar.gz", "tar.gz"),
+        ("windows", _) => ("_Windows_32bit.zip", "zip"),
+        ("macos", "aarch64") => ("_macOS_ARM64.tar.gz", "tar.gz"),
+        ("macos", _) => ("_macOS_64bit.tar.gz", "tar.gz"),
+        ("linux", "x86_64") => ("_Linux_64bit.tar.gz", "tar.gz"),
+        ("linux", "aarch64") => ("_Linux_ARM64.tar.gz", "tar.gz"),
+        ("linux", "arm") => ("_Linux_ARMv7.tar.gz", "tar.gz"),
+        _ => ("_Linux_64bit.tar.gz", "tar.gz"),
     }
 }
 
@@ -23,7 +23,12 @@ fn install_dir() -> PathBuf {
     {
         let base = std::env::var("LOCALAPPDATA")
             .map(PathBuf::from)
-            .unwrap_or_else(|_| dirs::home_dir().unwrap_or_default().join("AppData").join("Local"));
+            .unwrap_or_else(|_| {
+                dirs::home_dir()
+                    .unwrap_or_default()
+                    .join("AppData")
+                    .join("Local")
+            });
         base.join("Programs").join("arduino-cli")
     }
     #[cfg(not(windows))]
@@ -36,7 +41,11 @@ fn install_dir() -> PathBuf {
 }
 
 fn exe_name() -> &'static str {
-    if cfg!(windows) { "arduino-cli.exe" } else { "arduino-cli" }
+    if cfg!(windows) {
+        "arduino-cli.exe"
+    } else {
+        "arduino-cli"
+    }
 }
 
 pub fn install(force: bool) -> Result<PathBuf> {
@@ -59,12 +68,15 @@ pub fn install(force: bool) -> Result<PathBuf> {
 
     // Download to temp file
     let tmp_dir = std::env::temp_dir();
-    let archive_name = if ext == "zip" { "arduino-cli-dl.zip" } else { "arduino-cli-dl.tar.gz" };
+    let archive_name = if ext == "zip" {
+        "arduino-cli-dl.zip"
+    } else {
+        "arduino-cli-dl.tar.gz"
+    };
     let archive_path = tmp_dir.join(archive_name);
 
     println!("  Downloading…");
-    let response = reqwest::blocking::get(&url)
-        .context("download failed")?;
+    let response = reqwest::blocking::get(&url).context("download failed")?;
     let bytes = response.bytes().context("reading response bytes")?;
     std::fs::write(&archive_path, &bytes).context("writing archive")?;
 
@@ -76,7 +88,11 @@ pub fn install(force: bool) -> Result<PathBuf> {
     Ok(dest)
 }
 
-fn extract_binary(archive: &std::path::Path, ext: &str, dest_dir: &std::path::Path) -> Result<PathBuf> {
+fn extract_binary(
+    archive: &std::path::Path,
+    ext: &str,
+    dest_dir: &std::path::Path,
+) -> Result<PathBuf> {
     let exe = exe_name();
     let dest = dest_dir.join(exe);
 
@@ -84,7 +100,11 @@ fn extract_binary(archive: &std::path::Path, ext: &str, dest_dir: &std::path::Pa
         let file = std::fs::File::open(archive)?;
         let mut zip = zip::ZipArchive::new(file)?;
         let entry_idx = (0..zip.len())
-            .find(|&i| zip.by_index(i).map(|e| e.name().ends_with(exe)).unwrap_or(false))
+            .find(|&i| {
+                zip.by_index(i)
+                    .map(|e| e.name().ends_with(exe))
+                    .unwrap_or(false)
+            })
             .context("arduino-cli binary not found in zip")?;
         let mut entry = zip.by_index(entry_idx)?;
         let mut out = std::fs::File::create(&dest)?;
@@ -97,7 +117,11 @@ fn extract_binary(archive: &std::path::Path, ext: &str, dest_dir: &std::path::Pa
         for entry in tar.entries()? {
             let mut entry = entry?;
             let path = entry.path()?.to_path_buf();
-            if path.file_name().map(|n| n == "arduino-cli").unwrap_or(false) {
+            if path
+                .file_name()
+                .map(|n| n == "arduino-cli")
+                .unwrap_or(false)
+            {
                 entry.unpack(&dest)?;
                 found = true;
                 break;
@@ -167,7 +191,9 @@ fn ensure_on_path(dir: &std::path::Path) {
                     }
                 }
                 let current = std::env::var("PATH").unwrap_or_default();
-                unsafe { std::env::set_var("PATH", format!("{current}:{dir_str}")); }
+                unsafe {
+                    std::env::set_var("PATH", format!("{current}:{dir_str}"));
+                }
                 return;
             }
         }
@@ -175,7 +201,9 @@ fn ensure_on_path(dir: &std::path::Path) {
         let _ = std::fs::write(&profile, export_line.trim_start_matches('\n'));
         println!("  Created {} with PATH export", profile.display());
         let current = std::env::var("PATH").unwrap_or_default();
-        unsafe { std::env::set_var("PATH", format!("{current}:{dir_str}")); }
+        unsafe {
+            std::env::set_var("PATH", format!("{current}:{dir_str}"));
+        }
     }
 }
 
@@ -185,4 +213,63 @@ pub fn verify(exe: &std::path::Path) -> bool {
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false)
+}
+
+// ---------------------------------------------------------------------------
+// Onboarding toolchain: esp32 core + PubSubClient + the nff Arduino library, so
+// a fresh install can compile the bootstrap sketch that does `#include <nff.h>`.
+// Mirrors the Python installer.ensure_onboarding_toolchain.
+// ---------------------------------------------------------------------------
+
+// Espressif's board-manager index, passed per-command via --additional-urls so
+// installing the esp32 core never mutates the user's global arduino-cli config.
+const ESP32_BOARD_INDEX_URL: &str =
+    "https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json";
+
+fn run_arduino(args: &[&str]) -> bool {
+    let Some(cli) = crate::tools::toolchain::find_arduino_cli() else {
+        return false;
+    };
+    Command::new(&cli)
+        .args(args)
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// Install the esp32:esp32 Arduino core. Idempotent (arduino-cli no-ops if present).
+pub fn install_esp32_core() -> bool {
+    run_arduino(&[
+        "core",
+        "update-index",
+        "--additional-urls",
+        ESP32_BOARD_INDEX_URL,
+    ]) && run_arduino(&[
+        "core",
+        "install",
+        "esp32:esp32",
+        "--additional-urls",
+        ESP32_BOARD_INDEX_URL,
+    ])
+}
+
+/// Install an Arduino library by name via `arduino-cli lib install`.
+pub fn install_arduino_library(name: &str) -> bool {
+    run_arduino(&["lib", "install", name])
+}
+
+/// Ensure arduino-cli + esp32 core + PubSubClient + the nff Arduino library are
+/// present. Returns an actionable message on the first hard failure.
+pub fn ensure_onboarding_toolchain() -> Result<(), String> {
+    if crate::tools::toolchain::find_arduino_cli().is_none() {
+        install(false).map_err(|e| format!("could not install arduino-cli: {e}"))?;
+    }
+    if !install_esp32_core() {
+        return Err("esp32 core install failed".into());
+    }
+    if !install_arduino_library("PubSubClient") {
+        return Err("PubSubClient install failed".into());
+    }
+    crate::tools::arduino_lib::install_nff_library().map_err(|e| e.to_string())?;
+    Ok(())
 }

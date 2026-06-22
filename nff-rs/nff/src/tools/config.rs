@@ -196,9 +196,21 @@ pub fn set_default_device(
 ) -> Result<(), ConfigError> {
     let mut config = load()?;
     config.default_device = DeviceConfig {
-        port: if port.is_empty() { None } else { Some(port.into()) },
-        board: if board.is_empty() { None } else { Some(board.into()) },
-        fqbn: if fqbn.is_empty() { None } else { Some(fqbn.into()) },
+        port: if port.is_empty() {
+            None
+        } else {
+            Some(port.into())
+        },
+        board: if board.is_empty() {
+            None
+        } else {
+            Some(board.into())
+        },
+        fqbn: if fqbn.is_empty() {
+            None
+        } else {
+            Some(fqbn.into())
+        },
         baud,
     };
     save(&config)

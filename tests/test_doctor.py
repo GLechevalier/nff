@@ -15,6 +15,7 @@ from nff.commands.doctor import (
     check_config,
     check_device,
     check_esptool,
+    check_lib_sync,
     check_pyserial,
     check_python,
     doctor,
@@ -149,6 +150,36 @@ def test_check_device_passes_when_board_detected_and_port_open(monkeypatch):
     result = check_device()
     assert result.passed
     assert "COM10" in result.detail
+
+
+# ---------------------------------------------------------------------------
+# check_lib_sync
+# ---------------------------------------------------------------------------
+
+def test_check_lib_sync_not_synced_is_optional(monkeypatch):
+    monkeypatch.setattr("nff.tools.arduino_lib.read_sync_meta", lambda: {})
+    result = check_lib_sync()
+    assert not result.passed
+    assert result.optional  # never flips the doctor exit code
+
+
+def test_check_lib_sync_passes_when_fresh(monkeypatch):
+    monkeypatch.setattr("nff.tools.arduino_lib.read_sync_meta",
+                        lambda: {"version": "1.2.3", "synced_at": "2026-06-22T00:00:00+00:00"})
+    monkeypatch.setattr("nff.tools.arduino_lib.local_sdk_newer_than_synced", lambda: None)
+    result = check_lib_sync()
+    assert result.passed
+    assert "1.2.3" in result.detail
+
+
+def test_check_lib_sync_warns_when_stale(monkeypatch):
+    monkeypatch.setattr("nff.tools.arduino_lib.read_sync_meta", lambda: {"version": "1"})
+    monkeypatch.setattr("nff.tools.arduino_lib.local_sdk_newer_than_synced",
+                        lambda: "local nff-sdk-c has newer edits")
+    result = check_lib_sync()
+    assert not result.passed
+    assert result.optional
+    assert "newer" in result.detail
 
 
 # ---------------------------------------------------------------------------

@@ -72,7 +72,14 @@ pub fn run_status() -> Result<()> {
     if diag.access_token.is_some() {
         println!("Authenticated  (server: {})", diag.server_url);
         println!("  access_token : saved");
-        println!("  refresh_token: {}", if diag.refresh_token.is_some() { "saved" } else { "none" });
+        println!(
+            "  refresh_token: {}",
+            if diag.refresh_token.is_some() {
+                "saved"
+            } else {
+                "none"
+            }
+        );
     } else {
         println!("Not authenticated  (server: {})", diag.server_url);
         println!("  Run `nff auth login` to sign in.");

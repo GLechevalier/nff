@@ -1,5 +1,5 @@
 use crate::cli::FlashArgs;
-use crate::tools::{config, toolchain, wokwi};
+use crate::tools::{arduino_lib, config, toolchain, wokwi};
 use anyhow::{bail, Result};
 use std::io::{self, BufRead};
 use std::path::Path;
@@ -13,7 +13,9 @@ pub fn run(args: &FlashArgs) -> Result<()> {
 
     // Resolve FQBN
     let device_cfg = config::get_default_device().unwrap_or_default();
-    let fqbn = args.board.clone()
+    let fqbn = args
+        .board
+        .clone()
         .or_else(|| device_cfg.fqbn.clone())
         .unwrap_or_default();
 
@@ -21,7 +23,9 @@ pub fn run(args: &FlashArgs) -> Result<()> {
         bail!("Missing board FQBN (use --board or run nff init)");
     }
 
-    let port = args.port.clone()
+    let port = args
+        .port
+        .clone()
         .or_else(|| device_cfg.port.clone().filter(|p| !p.is_empty()))
         .unwrap_or_default();
 
@@ -32,24 +36,43 @@ pub fn run(args: &FlashArgs) -> Result<()> {
     let sketch_dir = resolve_sketch(file)?;
 
     if args.sim {
-        println!("  {}  →  {}  [sim]", sketch_dir.file_name().unwrap_or_default().to_string_lossy(), fqbn);
+        println!(
+            "  {}  →  {}  [sim]",
+            sketch_dir.file_name().unwrap_or_default().to_string_lossy(),
+            fqbn
+        );
         run_simulation(&sketch_dir, &fqbn, args.sim_timeout)?;
         return Ok(());
     }
 
-    println!("  {}  →  {} on {}", sketch_dir.file_name().unwrap_or_default().to_string_lossy(), fqbn, port);
+    println!(
+        "  {}  →  {} on {}",
+        sketch_dir.file_name().unwrap_or_default().to_string_lossy(),
+        fqbn,
+        port
+    );
 
-    // Compile
-    let mut compile_stream = toolchain::stream_compile(&sketch_dir, &fqbn)
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
-    println!("\n  Compiling…");
-    for line in compile_stream.run().map_err(|e| anyhow::anyhow!("{e}"))? {
+    // Non-blocking: warn if a local nff-sdk-c checkout is newer than the synced
+    // Arduino library, so "flash to test the fix" never silently builds old code.
+    if let Some(w) = arduino_lib::local_sdk_newer_than_synced() {
+        eprintln!("  warning: {w}");
+    }
+
+    let mut emit = |line: &str| {
         if !line.trim().is_empty() {
             println!("    {line}");
         }
-    }
-    if compile_stream.returncode != Some(0) {
-        bail!("Compile failed (exit {:?})", compile_stream.returncode);
+    };
+
+    // Compile (retries transient toolchain hiccups; a real compile error fails fast).
+    println!("\n  Compiling…");
+    let rc = toolchain::stream_with_retry(
+        || toolchain::stream_compile(&sketch_dir, &fqbn),
+        &mut emit,
+        toolchain::COMPILE_BACKOFF,
+    );
+    if rc != 0 {
+        bail!("Compile failed (exit {rc})");
     }
     println!("  ✓ Compile complete");
 
@@ -60,17 +83,15 @@ pub fn run(args: &FlashArgs) -> Result<()> {
         println!();
     }
 
-    // Upload
-    let mut upload_stream = toolchain::stream_upload(&sketch_dir, &fqbn, &port)
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    // Upload (longer backoff: the board re-enumerates after the auto-reset).
     println!("\n  Uploading…");
-    for line in upload_stream.run().map_err(|e| anyhow::anyhow!("{e}"))? {
-        if !line.trim().is_empty() {
-            println!("    {line}");
-        }
-    }
-    if upload_stream.returncode != Some(0) {
-        bail!("Upload failed (exit {:?})", upload_stream.returncode);
+    let rc = toolchain::stream_with_retry(
+        || toolchain::stream_upload(&sketch_dir, &fqbn, &port),
+        &mut emit,
+        toolchain::UPLOAD_BACKOFF,
+    );
+    if rc != 0 {
+        bail!("Upload failed (exit {rc})");
     }
     println!("  ✓ Upload complete");
 
@@ -90,7 +111,10 @@ fn resolve_sketch(path: &Path) -> Result<std::path::PathBuf> {
     }
 
     if path.extension().map(|e| e != "ino").unwrap_or(true) {
-        bail!("Expected a .ino file or sketch directory, got: {}", path.file_name().unwrap_or_default().to_string_lossy());
+        bail!(
+            "Expected a .ino file or sketch directory, got: {}",
+            path.file_name().unwrap_or_default().to_string_lossy()
+        );
     }
 
     // If already inside a correctly-named sketch dir, use parent
@@ -99,27 +123,33 @@ fn resolve_sketch(path: &Path) -> Result<std::path::PathBuf> {
     }
 
     // Loose .ino — write to temp sketch dir
-    println!("  Copying {} → temp sketch dir (multi-file sketches need a directory)", path.file_name().unwrap_or_default().to_string_lossy());
+    println!(
+        "  Copying {} → temp sketch dir (multi-file sketches need a directory)",
+        path.file_name().unwrap_or_default().to_string_lossy()
+    );
     let code = std::fs::read_to_string(path)?;
     toolchain::write_sketch(&code, None).map_err(|e| anyhow::anyhow!("{e}"))
 }
 
 fn run_simulation(sketch_dir: &Path, fqbn: &str, timeout_ms: u32) -> Result<()> {
     println!("  Compiling…");
-    let mut compile_stream = toolchain::stream_compile(sketch_dir, fqbn)
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
-    for line in compile_stream.run().map_err(|e| anyhow::anyhow!("{e}"))? {
+    let mut emit = |line: &str| {
         if !line.trim().is_empty() {
             println!("    {line}");
         }
-    }
-    if compile_stream.returncode != Some(0) {
-        bail!("Compile failed (exit {:?})", compile_stream.returncode);
+    };
+    let rc = toolchain::stream_with_retry(
+        || toolchain::stream_compile(sketch_dir, fqbn),
+        &mut emit,
+        toolchain::COMPILE_BACKOFF,
+    );
+    if rc != 0 {
+        bail!("Compile failed (exit {rc})");
     }
     println!("  ✓ Compile complete");
 
-    let elf_path = toolchain::locate_compiled_elf(sketch_dir, fqbn)
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let elf_path =
+        toolchain::locate_compiled_elf(sketch_dir, fqbn).map_err(|e| anyhow::anyhow!("{e}"))?;
 
     let diagram = wokwi::generate_diagram(fqbn).map_err(|e| anyhow::anyhow!("{e}"))?;
     std::fs::write(
@@ -129,7 +159,8 @@ fn run_simulation(sketch_dir: &Path, fqbn: &str, timeout_ms: u32) -> Result<()> 
     wokwi::write_wokwi_toml(sketch_dir, &elf_path).map_err(|e| anyhow::anyhow!("{e}"))?;
 
     println!("  Simulating…  (timeout: {timeout_ms} ms)");
-    let result = wokwi::run_simulation(sketch_dir, timeout_ms, Some(&elf_path)).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let result = wokwi::run_simulation(sketch_dir, timeout_ms, Some(&elf_path))
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
 
     for line in result.serial_output.lines() {
         println!("    {line}");

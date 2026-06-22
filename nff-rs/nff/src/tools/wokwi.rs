@@ -7,7 +7,8 @@ mod tests {
     use std::fs;
 
     fn tmp_dir(suffix: &str) -> PathBuf {
-        let p = std::env::temp_dir().join(format!("nff_wokwi_test_{suffix}_{}", std::process::id()));
+        let p =
+            std::env::temp_dir().join(format!("nff_wokwi_test_{suffix}_{}", std::process::id()));
         fs::create_dir_all(&p).unwrap();
         p
     }
@@ -17,21 +18,25 @@ mod tests {
     #[test]
     fn all_supported_boards_generate_diagrams() {
         let cases = [
-            ("arduino:avr:uno",         "wokwi-arduino-uno",       "uno1"),
-            ("arduino:avr:mega",        "wokwi-arduino-mega",      "mega1"),
-            ("arduino:avr:nano",        "wokwi-arduino-nano",      "nano1"),
-            ("arduino:avr:leonardo",    "wokwi-arduino-leonardo",  "leonardo1"),
-            ("esp32:esp32:esp32",       "wokwi-esp32-devkit-v1",   "esp321"),
-            ("esp8266:esp8266:generic", "wokwi-esp8266",           "generic1"),
+            ("arduino:avr:uno", "wokwi-arduino-uno", "uno1"),
+            ("arduino:avr:mega", "wokwi-arduino-mega", "mega1"),
+            ("arduino:avr:nano", "wokwi-arduino-nano", "nano1"),
+            (
+                "arduino:avr:leonardo",
+                "wokwi-arduino-leonardo",
+                "leonardo1",
+            ),
+            ("esp32:esp32:esp32", "wokwi-esp32-devkit-v1", "esp321"),
+            ("esp8266:esp8266:generic", "wokwi-esp8266", "generic1"),
         ];
         for (fqbn, chip, part_id) in cases {
             let d = generate_diagram(fqbn)
                 .unwrap_or_else(|e| panic!("generate_diagram({fqbn}) failed: {e}"));
             assert_eq!(d["version"], 1);
             assert_eq!(d["author"], "nff");
-            assert_eq!(d["parts"][0]["type"], chip,   "wrong chip for {fqbn}");
-            assert_eq!(d["parts"][0]["id"],   part_id, "wrong part_id for {fqbn}");
-            assert_eq!(d["parts"][0]["top"],  0);
+            assert_eq!(d["parts"][0]["type"], chip, "wrong chip for {fqbn}");
+            assert_eq!(d["parts"][0]["id"], part_id, "wrong part_id for {fqbn}");
+            assert_eq!(d["parts"][0]["top"], 0);
             assert_eq!(d["parts"][0]["left"], 0);
             assert!(d["connections"].as_array().unwrap().is_empty());
         }
@@ -41,8 +46,14 @@ mod tests {
     fn unsupported_board_returns_error() {
         let err = generate_diagram("bad:board:fqbn").unwrap_err();
         let msg = err.to_string();
-        assert!(msg.contains("Unsupported"), "error should mention 'Unsupported': {msg}");
-        assert!(msg.contains("bad:board:fqbn"), "error should name the bad FQBN: {msg}");
+        assert!(
+            msg.contains("Unsupported"),
+            "error should mention 'Unsupported': {msg}"
+        );
+        assert!(
+            msg.contains("bad:board:fqbn"),
+            "error should name the bad FQBN: {msg}"
+        );
     }
 
     #[test]
@@ -78,12 +89,18 @@ mod tests {
     fn write_wokwi_toml_content_is_valid() {
         let dir = tmp_dir("toml_content");
         // ELF inside the project dir → written as a relative path
-        let elf = dir.join("build").join("arduino.avr.uno").join("sketch.ino.elf");
+        let elf = dir
+            .join("build")
+            .join("arduino.avr.uno")
+            .join("sketch.ino.elf");
         write_wokwi_toml(&dir, &elf).unwrap();
         let content = fs::read_to_string(dir.join("wokwi.toml")).unwrap();
-        assert!(content.contains("[wokwi]"),     "missing [wokwi] header");
+        assert!(content.contains("[wokwi]"), "missing [wokwi] header");
         assert!(content.contains("version = 1"), "missing version");
-        assert!(content.contains("build/arduino.avr.uno/sketch.ino.elf"), "expected relative elf path");
+        assert!(
+            content.contains("build/arduino.avr.uno/sketch.ino.elf"),
+            "expected relative elf path"
+        );
         assert!(content.contains("firmware = \"\""), "missing firmware key");
         fs::remove_dir_all(dir).ok();
     }
@@ -95,7 +112,10 @@ mod tests {
         let elf = PathBuf::from("/unrelated/path/sketch.elf");
         write_wokwi_toml(&dir, &elf).unwrap();
         let content = fs::read_to_string(dir.join("wokwi.toml")).unwrap();
-        assert!(content.contains("/unrelated/path/sketch.elf"), "expected absolute elf path");
+        assert!(
+            content.contains("/unrelated/path/sketch.elf"),
+            "expected absolute elf path"
+        );
         fs::remove_dir_all(dir).ok();
     }
 
@@ -114,7 +134,11 @@ mod tests {
         std::env::set_var("WOKWI_CLI_TOKEN", "");
         let token = resolve_token();
         std::env::remove_var("WOKWI_CLI_TOKEN");
-        assert_ne!(token, Some("".to_string()), "empty env var should not be returned");
+        assert_ne!(
+            token,
+            Some("".to_string()),
+            "empty env var should not be returned"
+        );
     }
 }
 
@@ -133,11 +157,11 @@ pub enum WokwiError {
 }
 
 const FQBN_TO_CHIP: &[(&str, &str)] = &[
-    ("arduino:avr:uno",         "wokwi-arduino-uno"),
-    ("arduino:avr:mega",        "wokwi-arduino-mega"),
-    ("arduino:avr:nano",        "wokwi-arduino-nano"),
-    ("arduino:avr:leonardo",    "wokwi-arduino-leonardo"),
-    ("esp32:esp32:esp32",       "wokwi-esp32-devkit-v1"),
+    ("arduino:avr:uno", "wokwi-arduino-uno"),
+    ("arduino:avr:mega", "wokwi-arduino-mega"),
+    ("arduino:avr:nano", "wokwi-arduino-nano"),
+    ("arduino:avr:leonardo", "wokwi-arduino-leonardo"),
+    ("esp32:esp32:esp32", "wokwi-esp32-devkit-v1"),
     ("esp8266:esp8266:generic", "wokwi-esp8266"),
 ];
 
@@ -193,7 +217,11 @@ pub fn write_wokwi_toml(project_dir: &Path, elf_path: &Path) -> Result<PathBuf, 
 /// to let wokwi-cli read the path from `wokwi.toml` (used by `nff wokwi run`).
 /// Pass `Some` after a fresh compile to handle arduino-cli cache-hit scenarios
 /// where `--output-dir` is not populated.
-pub fn run_simulation(project_dir: &Path, timeout_ms: u32, elf: Option<&Path>) -> Result<WokwiResult, WokwiError> {
+pub fn run_simulation(
+    project_dir: &Path,
+    timeout_ms: u32,
+    elf: Option<&Path>,
+) -> Result<WokwiResult, WokwiError> {
     let wokwi_cli = toolchain::find_wokwi_cli().ok_or(WokwiError::CliNotFound)?;
 
     let mut cmd = std::process::Command::new(&wokwi_cli);

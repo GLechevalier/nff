@@ -28,7 +28,11 @@ fn nff() -> PathBuf {
     if path.ends_with("deps") {
         path.pop();
     }
-    if cfg!(windows) { path.join("nff.exe") } else { path.join("nff") }
+    if cfg!(windows) {
+        path.join("nff.exe")
+    } else {
+        path.join("nff")
+    }
 }
 
 /// Grab a currently-free TCP port by binding to :0 and immediately releasing it.
@@ -115,7 +119,11 @@ fn well_known_protected_resource_describes_this_server() {
         .get(server.url("/.well-known/oauth-protected-resource"))
         .send()
         .expect("request failed");
-    assert!(resp.status().is_success(), "expected 200, got {}", resp.status());
+    assert!(
+        resp.status().is_success(),
+        "expected 200, got {}",
+        resp.status()
+    );
     let body: serde_json::Value = resp.json().expect("body should be JSON");
     assert_eq!(body["resource"], server.base);
     assert_eq!(body["authorization_servers"][0], server.base);
@@ -131,7 +139,10 @@ fn well_known_authorization_server_advertises_oauth_endpoints() {
         .json()
         .expect("body should be JSON");
     assert_eq!(body["issuer"], server.base);
-    assert_eq!(body["authorization_endpoint"], server.url("/oauth/authorize"));
+    assert_eq!(
+        body["authorization_endpoint"],
+        server.url("/oauth/authorize")
+    );
     assert_eq!(body["token_endpoint"], server.url("/oauth/token"));
     assert_eq!(body["registration_endpoint"], server.url("/oauth/register"));
     assert_eq!(body["code_challenge_methods_supported"][0], "S256");
@@ -144,7 +155,11 @@ fn oauth_register_returns_static_client() {
         .post(server.url("/oauth/register"))
         .send()
         .expect("request failed");
-    assert_eq!(resp.status().as_u16(), 201, "dynamic registration should return 201 Created");
+    assert_eq!(
+        resp.status().as_u16(),
+        201,
+        "dynamic registration should return 201 Created"
+    );
     let body: serde_json::Value = resp.json().expect("body should be JSON");
     assert_eq!(body["client_id"], "nff-mcp");
     assert_eq!(body["token_endpoint_auth_method"], "none");
@@ -164,7 +179,11 @@ fn mcp_requires_bearer_auth() {
         .body(INIT_BODY)
         .send()
         .expect("request failed");
-    assert_eq!(resp.status().as_u16(), 401, "missing bearer token must be rejected");
+    assert_eq!(
+        resp.status().as_u16(),
+        401,
+        "missing bearer token must be rejected"
+    );
     let challenge = resp
         .headers()
         .get("www-authenticate")

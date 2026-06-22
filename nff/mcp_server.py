@@ -16,6 +16,7 @@ from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from mcp.types import TextContent, Tool
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+import nff.tools.arduino_lib as arduino_lib
 import nff.tools.boards as boards_module
 import nff.tools.serial as serial_module
 import nff.tools.toolchain as toolchain
@@ -114,12 +115,18 @@ async def flash(
         fqbn, resolved_port = _resolve_fqbn_and_port(board, port)
     except ValueError as exc:
         return f"ERROR: {exc}"
-    return toolchain.flash(
+    result = toolchain.flash(
         code=code,
         fqbn=fqbn,
         port=resolved_port,
         source=Path(sketch) if sketch else None,
     )
+    # Non-blocking: prepend a stale-lib warning so an agent never assumes a
+    # local SDK edit shipped when it actually built the stale synced library.
+    warn = arduino_lib.local_sdk_newer_than_synced()
+    if warn:
+        return f"warning: {warn}\n{result}"
+    return result
 
 
 async def serial_read(
@@ -401,7 +408,7 @@ async def auth_reconnect(
                 "claude", "mcp", "add",
                 "--scope", "user",
                 "--transport", "http",
-                "--url", "http://127.0.0.1:3001/mcp",
+                "--url", "http://127.0.0.1:3010/mcp",
                 "nff",
             ],
             capture_output=True,
@@ -412,7 +419,7 @@ async def auth_reconnect(
             return (
                 "OK: authenticated but MCP re-registration failed — run manually: "
                 "claude mcp add --scope user --transport http "
-                "--url http://127.0.0.1:3001/mcp nff"
+                "--url http://127.0.0.1:3010/mcp nff"
             )
     except Exception as exc:
         return f"OK: authenticated but could not re-register MCP: {exc}"
@@ -558,25 +565,35 @@ _DISPATCH = {
     "repair": repair,
 }
 
-# In-memory OAuth state (ephemeral — cleared on server restart, which forces a new login)
+# In-memory OAuth handshake state. These dicts only hold a request mid-flight (the
+# few seconds between /oauth/authorize and /oauth/token); a server restart loses
+# them but NOT the session — the issued MCP token lives in ~/.nff/config.json, so
+# Claude reconnects without a new login.
 _oauth_sessions: dict[str, dict] = {}  # session_id → {redirect_uri, state}
 _auth_codes: dict[str, str] = {}       # auth_code → mcp access token
 _pending_browser_auth: dict = {}       # at most one pending browser-login session
 
-# Lifetime of the opaque MCP access token handed to Claude Code. The proxy issues a
-# refresh token alongside it, so Claude refreshes silently — this only governs how
-# often that silent refresh happens, never a user-facing prompt. Decoupled from the
-# upstream Supabase JWT's (short) expiry, which is what caused re-auth every ~15 min.
+# Lifetime advertised for the opaque MCP access token handed to Claude Code. The
+# token itself is STABLE (see _get_or_create_mcp_session): a refresh returns the
+# same value with a fresh window, so this only governs how often Claude refreshes
+# silently, never a user-facing prompt. Decoupled from the upstream Supabase JWT's
+# (short) expiry, which is what caused re-auth every ~15 min.
 _MCP_TOKEN_TTL = 86400  # 24h
 
 
-def _mint_mcp_session() -> str:
-    """Create and persist a fresh opaque MCP access+refresh token pair.
+def _get_or_create_mcp_session() -> str:
+    """Return the persistent opaque MCP access token, creating it once if absent.
 
-    Returns the new access token. The matching refresh token is read back from
-    config at token-exchange time. Minting rotates both tokens, so any previously
-    issued pair is invalidated.
+    The token (and its refresh partner) is stored in ~/.nff/config.json and
+    deliberately does NOT rotate: it is a stable local credential, so the MCP
+    session survives Claude Code restarts, brand-new sessions, and nff-server
+    restarts. The user logs in once and keeps using it; the only thing that
+    invalidates it is an explicit deauth — auth_logout / auth_clear /
+    `nff auth logout` — all of which call config.clear_mcp_tokens().
     """
+    existing = config.get_mcp_tokens().get("access_token")
+    if existing:
+        return existing
     access = "nff_at_" + secrets.token_urlsafe(32)
     refresh = "nff_rt_" + secrets.token_urlsafe(32)
     config.set_mcp_tokens(access, refresh)
@@ -720,12 +737,19 @@ class _NffASGI:
             if not redirect_uri:
                 await self._send_json(send, 400, {"error": "missing redirect_uri"})
                 return
-            # Fast path: tokens already in config — no browser needed
+            # Fast path: a local credential already exists — no browser needed.
+            # This is what makes login persist across sessions. Either a stable
+            # MCP token from an earlier session, or diagnosis tokens from a prior
+            # login, short-circuits straight to an auth code bound to the SAME
+            # stable MCP token. Only an explicit deauth clears both and forces the
+            # browser back open.
             cfg = config.get_diagnosis_config()
-            existing_token = cfg.get("access_token")
-            if existing_token:
+            has_credential = bool(
+                config.get_mcp_tokens().get("access_token") or cfg.get("access_token")
+            )
+            if has_credential:
                 auth_code = secrets.token_urlsafe(32)
-                _auth_codes[auth_code] = _mint_mcp_session()
+                _auth_codes[auth_code] = _get_or_create_mcp_session()
                 sep = "&" if "?" in redirect_uri else "?"
                 await self._send_redirect(send, f"{redirect_uri}{sep}code={auth_code}&state={state}")
                 return
@@ -765,7 +789,7 @@ class _NffASGI:
                 )
                 return
             auth_code = secrets.token_urlsafe(32)
-            _auth_codes[auth_code] = _mint_mcp_session()
+            _auth_codes[auth_code] = _get_or_create_mcp_session()
             sep = "&" if "?" in session["redirect_uri"] else "?"
             location = (
                 f"{session['redirect_uri']}{sep}"
@@ -788,8 +812,11 @@ class _NffASGI:
                 if not presented or not stored or presented != stored:
                     await self._send_json(send, 400, {"error": "invalid_grant"})
                     return
-                # Rotate: mint a fresh access+refresh pair, invalidating the old one.
-                access_token = _mint_mcp_session()
+                # Stable: hand back the SAME persistent pair with a fresh window.
+                # Not rotating means Claude's stored credential keeps matching
+                # config across sessions, so the user never has to log in again
+                # until an explicit deauth clears the tokens.
+                access_token = _get_or_create_mcp_session()
                 refresh_token = config.get_mcp_tokens().get("refresh_token") or ""
                 await self._send_json(send, 200, {
                     "access_token": access_token,

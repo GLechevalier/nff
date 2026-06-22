@@ -65,7 +65,10 @@ pub fn run_batch(args: &BatchArgs) -> anyhow::Result<()> {
         .with_context(|| format!("could not write {}", args.out.display()))?;
 
     let batch_id = data.get("batch_id").and_then(|b| b.as_str()).unwrap_or("?");
-    let hours = data.get("expires_in_hours").and_then(|h| h.as_u64()).unwrap_or(24);
+    let hours = data
+        .get("expires_in_hours")
+        .and_then(|h| h.as_u64())
+        .unwrap_or(24);
     println!("OK: batch {batch_id} created for project {}", args.project);
     println!("  credentials.h written to {}", args.out.display());
     match args.count {

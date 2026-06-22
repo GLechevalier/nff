@@ -22,8 +22,7 @@ pub fn run_init(args: &WokwiInitArgs) -> Result<()> {
     println!("  ✓ diagram.json written  ({chip})");
 
     let elf_path = toolchain::elf_path_for(&cwd, &fqbn);
-    wokwi::write_wokwi_toml(&cwd, &elf_path)
-        .context("Failed to write wokwi.toml")?;
+    wokwi::write_wokwi_toml(&cwd, &elf_path).context("Failed to write wokwi.toml")?;
     println!("  ✓ wokwi.toml written  (elf: {})", elf_path.display());
 
     if let Some(token) = &args.token {
@@ -75,7 +74,10 @@ pub fn run_run(args: &WokwiRunArgs) -> Result<()> {
         bail!("wokwi-cli not found.\n    Install from https://github.com/wokwi/wokwi-cli");
     }
 
-    println!("  nff wokwi run  —  timeout: {} ms  —  Ctrl+C to abort", args.timeout);
+    println!(
+        "  nff wokwi run  —  timeout: {} ms  —  Ctrl+C to abort",
+        args.timeout
+    );
     println!("{}", "─".repeat(60));
 
     let result = wokwi::run_simulation(&cwd, args.timeout, None).context("Simulation failed")?;

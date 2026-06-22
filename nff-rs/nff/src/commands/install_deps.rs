@@ -24,8 +24,7 @@ pub fn run(args: &InstallDepsArgs) -> Result<()> {
     } else {
         println!("wokwi-cli  (optional — for --sim and nff wokwi)");
         // Delegate wokwi-cli install to Python (kept in Python per migration plan)
-        let python = which::which("python")
-            .or_else(|_| which::which("python3"));
+        let python = which::which("python").or_else(|_| which::which("python3"));
         match python {
             Ok(py) => {
                 let status = std::process::Command::new(&py)
@@ -42,7 +41,9 @@ pub fn run(args: &InstallDepsArgs) -> Result<()> {
                 }
             }
             Err(_) => {
-                eprintln!("  ⚠  Python not found — install wokwi-cli manually: npm install -g @wokwi/cli");
+                eprintln!(
+                    "  ⚠  Python not found — install wokwi-cli manually: npm install -g @wokwi/cli"
+                );
             }
         }
     }

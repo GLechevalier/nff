@@ -118,3 +118,74 @@ def verify(exe: Path) -> bool:
         return r.returncode == 0
     except Exception:
         return False
+
+
+# ---------------------------------------------------------------------------
+# ESP32 toolchain for `nff init` onboarding (core + libraries + nff lib)
+# ---------------------------------------------------------------------------
+
+# Espressif's Arduino board-manager index. Passed per-command via --additional-urls
+# so installing the esp32 core never mutates the user's global arduino-cli config.
+_ESP32_BOARD_INDEX_URL = (
+    "https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json"
+)
+
+
+def install_esp32_core(emit=print) -> bool:
+    """Install the esp32:esp32 Arduino core. Idempotent (arduino-cli no-ops if present)."""
+    from nff.tools import toolchain
+    extra = ["--additional-urls", _ESP32_BOARD_INDEX_URL]
+    try:
+        for args in (["core", "update-index", *extra], ["core", "install", "esp32:esp32", *extra]):
+            stream = toolchain.stream_arduino_cli(args)
+            for line in stream:
+                emit(line)
+            if stream.returncode != 0:
+                return False
+    except toolchain.ToolchainError as exc:
+        emit(str(exc))
+        return False
+    return True
+
+
+def install_arduino_library(name: str, emit=print) -> bool:
+    """Install an Arduino library by name via `arduino-cli lib install`."""
+    from nff.tools import toolchain
+    try:
+        stream = toolchain.stream_arduino_cli(["lib", "install", name])
+        for line in stream:
+            emit(line)
+        return stream.returncode == 0
+    except toolchain.ToolchainError as exc:
+        emit(str(exc))
+        return False
+
+
+def ensure_onboarding_toolchain(emit=print) -> tuple[bool, str]:
+    """Ensure everything the onboarding firmware needs to compile is installed:
+    arduino-cli, the esp32 core, PubSubClient, and the nff Arduino library.
+
+    Returns (ok, message). The first hard failure short-circuits with an
+    actionable message; callers should abort the compile when ok is False.
+    """
+    from nff.tools import arduino_lib, toolchain
+
+    if not toolchain.find_arduino_cli():
+        emit("installing arduino-cli…")
+        try:
+            install()
+        except Exception as exc:
+            return False, f"could not install arduino-cli: {exc}"
+
+    if not install_esp32_core(emit):
+        return False, "esp32 core install failed"
+
+    if not install_arduino_library("PubSubClient", emit):
+        return False, "PubSubClient install failed"
+
+    try:
+        arduino_lib.install_nff_library(emit)
+    except arduino_lib.ArduinoLibError as exc:
+        return False, str(exc)
+
+    return True, "toolchain ready"

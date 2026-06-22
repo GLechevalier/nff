@@ -2,10 +2,9 @@ use std::net::TcpListener;
 use std::sync::{Arc, Mutex};
 
 use rmcp::{
-    ServerHandler,
     handler::server::wrapper::Parameters,
     model::{Implementation, ServerCapabilities, ServerInfo},
-    tool, tool_handler, tool_router,
+    tool, tool_handler, tool_router, ServerHandler,
 };
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -217,11 +216,22 @@ fn reregister_claude() -> String {
         .args(["mcp", "remove", "--scope", "user", "nff"])
         .output();
     let out = std::process::Command::new(&claude)
-        .args(["mcp", "add", "--scope", "user", "--transport", "http", "nff", url])
+        .args([
+            "mcp",
+            "add",
+            "--scope",
+            "user",
+            "--transport",
+            "http",
+            "nff",
+            url,
+        ])
         .output();
     match out {
         Ok(o) if o.status.success() => "Re-registered with Claude Code.".into(),
-        _ => format!("Could not re-register; run: claude mcp add --scope user --transport http nff {url}"),
+        _ => format!(
+            "Could not re-register; run: claude mcp add --scope user --transport http nff {url}"
+        ),
     }
 }
 
@@ -375,7 +385,10 @@ async fn oauth_authorize(
 ) -> Response {
     let params = parse_query(&q);
     let Some(redirect_uri) = params.get("redirect_uri").cloned() else {
-        return json_response(StatusCode::BAD_REQUEST, &json!({ "error": "missing redirect_uri" }));
+        return json_response(
+            StatusCode::BAD_REQUEST,
+            &json!({ "error": "missing redirect_uri" }),
+        );
     };
     let state = params.get("state").cloned().unwrap_or_default();
     let cfg = crate::tools::config::load().unwrap_or_default();
@@ -383,17 +396,24 @@ async fn oauth_authorize(
     // Fast path: diagnosis tokens already present — no browser round-trip needed.
     if cfg.diagnosis.access_token.is_some() {
         let code = random_token("code_");
-        oauth.auth_codes.lock().unwrap().insert(code.clone(), mint_mcp_session());
+        oauth
+            .auth_codes
+            .lock()
+            .unwrap()
+            .insert(code.clone(), mint_mcp_session());
         let sep = if redirect_uri.contains('?') { '&' } else { '?' };
-        return Redirect::to(&format!("{redirect_uri}{sep}code={code}&state={state}")).into_response();
+        return Redirect::to(&format!("{redirect_uri}{sep}code={code}&state={state}"))
+            .into_response();
     }
 
     let session_id = random_token("sess_");
-    oauth
-        .sessions
-        .lock()
-        .unwrap()
-        .insert(session_id.clone(), OAuthSession { redirect_uri, state });
+    oauth.sessions.lock().unwrap().insert(
+        session_id.clone(),
+        OAuthSession {
+            redirect_uri,
+            state,
+        },
+    );
     let callback_url = format!("{}/oauth/callback/{session_id}", oauth.base);
     let login_url = format!(
         "{}/login?cb={}",
@@ -432,8 +452,16 @@ async fn oauth_callback(
             .into_response();
     };
     let code = random_token("code_");
-    oauth.auth_codes.lock().unwrap().insert(code.clone(), mint_mcp_session());
-    let sep = if session.redirect_uri.contains('?') { '&' } else { '?' };
+    oauth
+        .auth_codes
+        .lock()
+        .unwrap()
+        .insert(code.clone(), mint_mcp_session());
+    let sep = if session.redirect_uri.contains('?') {
+        '&'
+    } else {
+        '?'
+    };
     Redirect::to(&format!(
         "{}{sep}code={code}&state={}",
         session.redirect_uri, session.state
@@ -447,9 +475,14 @@ async fn oauth_token(Extension(oauth): Extension<Arc<OAuthState>>, body: String)
 
     if grant_type == "refresh_token" {
         let presented = params.get("refresh_token").cloned().unwrap_or_default();
-        let stored = crate::tools::config::get_mcp_tokens().ok().and_then(|m| m.refresh_token);
+        let stored = crate::tools::config::get_mcp_tokens()
+            .ok()
+            .and_then(|m| m.refresh_token);
         if presented.is_empty() || stored.as_deref() != Some(presented.as_str()) {
-            return json_response(StatusCode::BAD_REQUEST, &json!({ "error": "invalid_grant" }));
+            return json_response(
+                StatusCode::BAD_REQUEST,
+                &json!({ "error": "invalid_grant" }),
+            );
         }
         // Rotate: mint a fresh pair, invalidating the old one.
         let access = mint_mcp_session();
@@ -469,7 +502,10 @@ async fn oauth_token(Extension(oauth): Extension<Arc<OAuthState>>, body: String)
     let code = params.get("code").cloned().unwrap_or_default();
     let access = oauth.auth_codes.lock().unwrap().remove(&code);
     let Some(access) = access else {
-        return json_response(StatusCode::BAD_REQUEST, &json!({ "error": "invalid_grant" }));
+        return json_response(
+            StatusCode::BAD_REQUEST,
+            &json!({ "error": "invalid_grant" }),
+        );
     };
     let refresh = crate::tools::config::get_mcp_tokens()
         .ok()
@@ -509,7 +545,9 @@ impl NffServer {
         json!({ "devices": list }).to_string()
     }
 
-    #[tool(description = "Compile a sketch ONLY — no board or port needed. Use this to verify a sketch builds. Pass sketch= (path to a .ino file or folder, preferred) or code=. board= defaults to the configured FQBN. Returns JSON: {ok, fqbn, elf, image, artifacts, errors, output}.")]
+    #[tool(
+        description = "Compile a sketch ONLY — no board or port needed. Use this to verify a sketch builds. Pass sketch= (path to a .ino file or folder, preferred) or code=. board= defaults to the configured FQBN. Returns JSON: {ok, fqbn, elf, image, artifacts, errors, output}."
+    )]
     fn compile(&self, Parameters(p): Parameters<CompileParams>) -> String {
         use crate::tools::{config, toolchain};
         let fqbn = p
@@ -523,7 +561,9 @@ impl NffServer {
         }
     }
 
-    #[tool(description = "Compile AND upload a sketch to the connected board (needs a port). To only check that a sketch builds, use `compile` instead. Pass sketch= (path, preferred) or code=. Returns OK: on success or ERROR: on failure.")]
+    #[tool(
+        description = "Compile AND upload a sketch to the connected board (needs a port). To only check that a sketch builds, use `compile` instead. Pass sketch= (path, preferred) or code=. Returns OK: on success or ERROR: on failure."
+    )]
     fn flash(&self, Parameters(p): Parameters<FlashParams>) -> String {
         use crate::tools::{config, toolchain};
         let device = config::get_default_device().unwrap_or_default();
@@ -543,15 +583,25 @@ impl NffServer {
             Ok(d) => d,
             Err(e) => return format!("ERROR: {e}"),
         };
-        toolchain::flash_sketch(&sketch_dir, &fqbn, &port)
+        let result = toolchain::flash_sketch(&sketch_dir, &fqbn, &port);
+        // Non-blocking: prepend a stale-lib warning so an agent never assumes a
+        // local SDK edit shipped when it actually built the stale synced library.
+        match crate::tools::arduino_lib::local_sdk_newer_than_synced() {
+            Some(w) => format!("warning: {w}\n{result}"),
+            None => result,
+        }
     }
 
-    #[tool(description = "Capture serial output from the device for a given duration. Returns captured text or ERROR:.")]
+    #[tool(
+        description = "Capture serial output from the device for a given duration. Returns captured text or ERROR:."
+    )]
     fn serial_read(&self, Parameters(p): Parameters<SerialReadParams>) -> String {
         crate::tools::serial::serial_read(p.duration_ms, p.port.as_deref(), p.baud)
     }
 
-    #[tool(description = "Send a string to the device over serial. Returns OK: wrote N bytes or ERROR:.")]
+    #[tool(
+        description = "Send a string to the device over serial. Returns OK: wrote N bytes or ERROR:."
+    )]
     fn serial_write(&self, Parameters(p): Parameters<SerialWriteParams>) -> String {
         crate::tools::serial::serial_write(&p.data, p.port.as_deref(), p.baud)
     }
@@ -596,7 +646,9 @@ impl NffServer {
         }
     }
 
-    #[tool(description = "Compile a sketch and run it in the Wokwi simulator. No hardware needed. Returns JSON with serial_output, compile_output, exit_code, simulated.")]
+    #[tool(
+        description = "Compile a sketch and run it in the Wokwi simulator. No hardware needed. Returns JSON with serial_output, compile_output, exit_code, simulated."
+    )]
     fn wokwi_flash(&self, Parameters(p): Parameters<WokwiFlashParams>) -> String {
         use crate::tools::{toolchain, wokwi};
         let fqbn = match resolve_fqbn(p.board) {
@@ -617,7 +669,9 @@ impl NffServer {
         }
         let elf_path = match toolchain::locate_compiled_elf(&sketch_dir, &fqbn) {
             Ok(p) => p,
-            Err(e) => return json_sim_error("", &format!("{compile_output}\nelf locate error: {e}"), 1),
+            Err(e) => {
+                return json_sim_error("", &format!("{compile_output}\nelf locate error: {e}"), 1)
+            }
         };
         let diagram = match wokwi::generate_diagram(&fqbn) {
             Ok(d) => d,
@@ -691,7 +745,9 @@ impl NffServer {
         }
     }
 
-    #[tool(description = "Log in to the nff diagnosis server. Provide email+password for a direct login, or omit both to open the browser login page — then call complete_authentication once you have signed in.")]
+    #[tool(
+        description = "Log in to the nff diagnosis server. Provide email+password for a direct login, or omit both to open the browser login page — then call complete_authentication once you have signed in."
+    )]
     fn authenticate(&self, Parameters(p): Parameters<AuthLoginParams>) -> String {
         match (p.email, p.password) {
             (Some(email), Some(password)) => {
@@ -726,7 +782,9 @@ impl NffServer {
         }
     }
 
-    #[tool(description = "Wait for a browser login started by authenticate() to complete and save the tokens. Optional timeout in seconds (default 120).")]
+    #[tool(
+        description = "Wait for a browser login started by authenticate() to complete and save the tokens. Optional timeout in seconds (default 120)."
+    )]
     fn complete_authentication(&self, Parameters(p): Parameters<CompleteAuthParams>) -> String {
         let listener = match self.pending_auth.lock().unwrap().take() {
             Some(l) => l,
@@ -736,7 +794,8 @@ impl NffServer {
         };
         match crate::tools::auth::wait_for_callback(listener, p.timeout as u64) {
             Ok(t) => {
-                match crate::tools::config::set_diagnosis_tokens(&t.access_token, &t.refresh_token) {
+                match crate::tools::config::set_diagnosis_tokens(&t.access_token, &t.refresh_token)
+                {
                     Ok(_) => "OK: authenticated".into(),
                     Err(e) => format!("ERROR: could not save tokens: {e}"),
                 }
@@ -745,7 +804,9 @@ impl NffServer {
         }
     }
 
-    #[tool(description = "Force-clear stored auth tokens locally without calling the server. Use when the server is unreachable or tokens are corrupted.")]
+    #[tool(
+        description = "Force-clear stored auth tokens locally without calling the server. Use when the server is unreachable or tokens are corrupted."
+    )]
     fn auth_clear(&self) -> String {
         let _ = crate::tools::config::clear_diagnosis_tokens();
         match crate::tools::config::clear_mcp_tokens() {
@@ -754,7 +815,9 @@ impl NffServer {
         }
     }
 
-    #[tool(description = "Re-authenticate with the diagnosis server and re-register the MCP connection in Claude Code. Provide email+password for direct login, or omit both for browser OAuth. Restart Claude Code afterwards.")]
+    #[tool(
+        description = "Re-authenticate with the diagnosis server and re-register the MCP connection in Claude Code. Provide email+password for direct login, or omit both for browser OAuth. Restart Claude Code afterwards."
+    )]
     fn auth_reconnect(&self, Parameters(p): Parameters<AuthLoginParams>) -> String {
         let auth_result = std::thread::spawn(move || login_blocking(p.email, p.password))
             .join()
@@ -790,7 +853,9 @@ impl NffServer {
         .unwrap_or_else(|_| "ERROR: logout thread panicked".into())
     }
 
-    #[tool(description = "Return authentication status for the nff diagnosis server. Call this before `repair` to check whether the user is logged in.")]
+    #[tool(
+        description = "Return authentication status for the nff diagnosis server. Call this before `repair` to check whether the user is logged in."
+    )]
     fn auth_status(&self) -> String {
         match crate::tools::config::load() {
             Err(e) => format!("ERROR: {e}"),
@@ -801,7 +866,9 @@ impl NffServer {
         }
     }
 
-    #[tool(description = "Send serial/crash output to the nff diagnosis server and return a structured diagnosis as JSON. Requires prior authentication — run `nff auth login` from the terminal if not yet logged in.")]
+    #[tool(
+        description = "Send serial/crash output to the nff diagnosis server and return a structured diagnosis as JSON. Requires prior authentication — run `nff auth login` from the terminal if not yet logged in."
+    )]
     fn repair(&self, Parameters(p): Parameters<RepairParams>) -> String {
         let config = match crate::tools::config::load() {
             Ok(c) => c,
@@ -867,7 +934,9 @@ impl NffServer {
         .unwrap_or_else(|_| "ERROR: repair thread panicked".into())
     }
 
-    #[tool(description = "Return a minimal diagram.json for the given board FQBN as a pretty-printed JSON string")]
+    #[tool(
+        description = "Return a minimal diagram.json for the given board FQBN as a pretty-printed JSON string"
+    )]
     fn wokwi_get_diagram(&self, Parameters(p): Parameters<BoardParam>) -> String {
         match crate::tools::wokwi::generate_diagram(&p.board) {
             Ok(d) => serde_json::to_string_pretty(&d).unwrap_or_else(|e| format!("ERROR: {e}")),
@@ -877,6 +946,7 @@ impl NffServer {
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
 
@@ -893,8 +963,7 @@ mod tests {
 
     #[test]
     fn flash_params_accepts_sketch_path() {
-        let p: FlashParams =
-            serde_json::from_str(r#"{"sketch":"sketches/blink_esp32"}"#).unwrap();
+        let p: FlashParams = serde_json::from_str(r#"{"sketch":"sketches/blink_esp32"}"#).unwrap();
         assert_eq!(p.sketch, Some("sketches/blink_esp32".into()));
         assert!(p.code.is_none());
     }
@@ -956,8 +1025,7 @@ mod tests {
     #[test]
     fn board_param_required() {
         assert!(serde_json::from_str::<BoardParam>(r#"{}"#).is_err());
-        let p: BoardParam =
-            serde_json::from_str(r#"{"board":"arduino:avr:uno"}"#).unwrap();
+        let p: BoardParam = serde_json::from_str(r#"{"board":"arduino:avr:uno"}"#).unwrap();
         assert_eq!(p.board, "arduino:avr:uno");
     }
 
@@ -994,7 +1062,7 @@ pub async fn run(bind: &str) -> anyhow::Result<()> {
         Router,
     };
     use rmcp::transport::streamable_http_server::{
-        session::local::LocalSessionManager, StreamableHttpService, StreamableHttpServerConfig,
+        session::local::LocalSessionManager, StreamableHttpServerConfig, StreamableHttpService,
     };
 
     let oauth = Arc::new(OAuthState {
@@ -1006,7 +1074,11 @@ pub async fn run(bind: &str) -> anyhow::Result<()> {
     // Shared across all sessions so authenticate()/complete_authentication() agree.
     let pending_auth: Arc<Mutex<Option<TcpListener>>> = Arc::new(Mutex::new(None));
     let service = StreamableHttpService::new(
-        move || Ok(NffServer { pending_auth: pending_auth.clone() }),
+        move || {
+            Ok(NffServer {
+                pending_auth: pending_auth.clone(),
+            })
+        },
         Arc::<LocalSessionManager>::default(),
         StreamableHttpServerConfig::default(),
     );
@@ -1018,7 +1090,10 @@ pub async fn run(bind: &str) -> anyhow::Result<()> {
 
     let app = Router::new()
         .route("/.well-known/oauth-protected-resource", get(wk_resource))
-        .route("/.well-known/oauth-authorization-server", get(wk_authorization_server))
+        .route(
+            "/.well-known/oauth-authorization-server",
+            get(wk_authorization_server),
+        )
         .route("/oauth/register", post(oauth_register))
         .route("/oauth/authorize", get(oauth_authorize))
         .route("/oauth/callback/{session_id}", get(oauth_callback))

@@ -1,7 +1,34 @@
 use crate::tools::config;
-use std::io::Write;
+use crate::tools::retry;
+use std::io::{Read, Write};
 use std::time::{Duration, Instant};
 use thiserror::Error;
+
+// Bounded retry for transient serial faults (port still held / re-enumerating).
+const SERIAL_BACKOFF: &[f64] = &[0.3, 0.8];
+
+/// Run a serial op (returning Ok(success string) / Err(raw message)), retrying
+/// transient faults. Returns `"ERROR: <msg>"` on a non-transient fault or once
+/// retries are exhausted. Mirrors the Python `_with_serial_retry`.
+fn with_serial_retry(
+    mut op: impl FnMut() -> Result<String, String>,
+    sleep: impl Fn(f64),
+) -> String {
+    let mut last = String::new();
+    for i in 0..=SERIAL_BACKOFF.len() {
+        match op() {
+            Ok(s) => return s,
+            Err(e) => {
+                last = e;
+                if i == SERIAL_BACKOFF.len() || !retry::is_transient(&last) {
+                    return format!("ERROR: {last}");
+                }
+                sleep(SERIAL_BACKOFF[i.min(SERIAL_BACKOFF.len() - 1)]);
+            }
+        }
+    }
+    format!("ERROR: {last}")
+}
 
 #[derive(Error, Debug)]
 pub enum SerialError {
@@ -27,8 +54,8 @@ pub fn resolve_port(opt: Option<&str>) -> Result<String, SerialError> {
     if let Some(p) = opt {
         return Ok(p.to_string());
     }
-    let cfg = config::get_default_device()
-        .map_err(|e| SerialError::ConfigUnreadable(e.to_string()))?;
+    let cfg =
+        config::get_default_device().map_err(|e| SerialError::ConfigUnreadable(e.to_string()))?;
     cfg.port
         .filter(|p| !p.is_empty())
         .ok_or(SerialError::NoPort)
@@ -38,16 +65,17 @@ pub fn resolve_baud(opt: Option<u32>) -> Result<u32, SerialError> {
     if let Some(b) = opt {
         return Ok(b);
     }
-    Ok(config::get_default_device()
-        .map(|c| c.baud)
-        .unwrap_or(9600))
+    Ok(config::get_default_device().map(|c| c.baud).unwrap_or(9600))
 }
 
 fn open_port(port: &str, baud: u32) -> Result<Box<dyn serialport::SerialPort>, SerialError> {
     serialport::new(port, baud)
         .timeout(Duration::from_millis(100))
         .open()
-        .map_err(|e| SerialError::Open { port: port.to_string(), source: e })
+        .map_err(|e| SerialError::Open {
+            port: port.to_string(),
+            source: e,
+        })
 }
 
 pub fn serial_read(duration_ms: u64, port: Option<&str>, baud: Option<u32>) -> String {
@@ -57,24 +85,24 @@ pub fn serial_read(duration_ms: u64, port: Option<&str>, baud: Option<u32>) -> S
     };
     let baud_val = resolve_baud(baud).unwrap_or(9600);
 
-    let mut sp = match open_port(&port_str, baud_val) {
-        Ok(p) => p,
-        Err(e) => return format!("ERROR: {e}"),
-    };
-
-    let deadline = Instant::now() + Duration::from_millis(duration_ms);
-    let mut buf = Vec::new();
-
-    while Instant::now() < deadline {
-        let mut chunk = [0u8; 256];
-        match sp.read(&mut chunk) {
-            Ok(0) => {}
-            Ok(n) => buf.extend_from_slice(&chunk[..n]),
-            Err(ref e) if e.kind() == std::io::ErrorKind::TimedOut => {}
-            Err(e) => return format!("ERROR: {e}"),
-        }
-    }
-    String::from_utf8_lossy(&buf).into_owned()
+    with_serial_retry(
+        || {
+            let mut sp = open_port(&port_str, baud_val).map_err(|e| e.to_string())?;
+            let deadline = Instant::now() + Duration::from_millis(duration_ms);
+            let mut buf = Vec::new();
+            while Instant::now() < deadline {
+                let mut chunk = [0u8; 256];
+                match sp.read(&mut chunk) {
+                    Ok(0) => {}
+                    Ok(n) => buf.extend_from_slice(&chunk[..n]),
+                    Err(ref e) if e.kind() == std::io::ErrorKind::TimedOut => {}
+                    Err(e) => return Err(e.to_string()),
+                }
+            }
+            Ok(String::from_utf8_lossy(&buf).into_owned())
+        },
+        retry::real_sleep,
+    )
 }
 
 pub fn serial_write(data: &str, port: Option<&str>, baud: Option<u32>) -> String {
@@ -90,16 +118,15 @@ pub fn serial_write(data: &str, port: Option<&str>, baud: Option<u32>) -> String
     };
     let baud_val = resolve_baud(baud).unwrap_or(9600);
 
-    let mut sp = match open_port(&port_str, baud_val) {
-        Ok(p) => p,
-        Err(e) => return format!("ERROR: {e}"),
-    };
-
-    let bytes = data.as_bytes();
-    match sp.write_all(bytes) {
-        Ok(_) => format!("OK: wrote {} byte(s) to {}", bytes.len(), port_str),
-        Err(e) => format!("ERROR: {e}"),
-    }
+    with_serial_retry(
+        || {
+            let mut sp = open_port(&port_str, baud_val).map_err(|e| e.to_string())?;
+            let bytes = data.as_bytes();
+            sp.write_all(bytes).map_err(|e| e.to_string())?;
+            Ok(format!("OK: wrote {} byte(s) to {}", bytes.len(), port_str))
+        },
+        retry::real_sleep,
+    )
 }
 
 pub fn reset_device(port: Option<&str>) -> String {
@@ -108,27 +135,26 @@ pub fn reset_device(port: Option<&str>) -> String {
         Err(e) => return format!("ERROR: {e}"),
     };
 
-    let mut sp = match serialport::new(&port_str, 9600)
-        .timeout(Duration::from_millis(1000))
-        .open()
-    {
-        Ok(p) => p,
-        Err(e) => return format!("ERROR: Could not reset {port_str}: {e}"),
-    };
-
-    if let Err(e) = sp.write_data_terminal_ready(false) {
-        return format!("ERROR: Could not reset {port_str}: {e}");
-    }
-    std::thread::sleep(Duration::from_millis(50));
-    if let Err(e) = sp.write_data_terminal_ready(true) {
-        return format!("ERROR: Could not reset {port_str}: {e}");
-    }
-    std::thread::sleep(Duration::from_millis(50));
-
-    format!("OK: reset {port_str} via DTR toggle")
+    with_serial_retry(
+        || {
+            let mut sp = serialport::new(&port_str, 9600)
+                .timeout(Duration::from_millis(1000))
+                .open()
+                .map_err(|e| format!("Could not reset {port_str}: {e}"))?;
+            sp.write_data_terminal_ready(false)
+                .map_err(|e| format!("Could not reset {port_str}: {e}"))?;
+            std::thread::sleep(Duration::from_millis(50));
+            sp.write_data_terminal_ready(true)
+                .map_err(|e| format!("Could not reset {port_str}: {e}"))?;
+            std::thread::sleep(Duration::from_millis(50));
+            Ok(format!("OK: reset {port_str} via DTR toggle"))
+        },
+        retry::real_sleep,
+    )
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
 
@@ -147,9 +173,9 @@ mod tests {
 
     #[test]
     fn resolve_baud_explicit_values() {
-        assert_eq!(resolve_baud(Some(9600)).unwrap(),   9600);
+        assert_eq!(resolve_baud(Some(9600)).unwrap(), 9600);
         assert_eq!(resolve_baud(Some(115200)).unwrap(), 115200);
-        assert_eq!(resolve_baud(Some(57600)).unwrap(),  57600);
+        assert_eq!(resolve_baud(Some(57600)).unwrap(), 57600);
     }
 
     #[test]
@@ -190,6 +216,38 @@ mod tests {
             "expected ERROR: prefix, got: {result}"
         );
     }
+
+    #[test]
+    fn with_serial_retry_recovers_after_transient() {
+        let mut n = 0;
+        let out = with_serial_retry(
+            || {
+                n += 1;
+                if n == 1 {
+                    Err("could not open port 'COM5'".to_string()) // transient
+                } else {
+                    Ok("OK: done".to_string())
+                }
+            },
+            |_| {},
+        );
+        assert_eq!(out, "OK: done");
+        assert_eq!(n, 2);
+    }
+
+    #[test]
+    fn with_serial_retry_fails_fast_on_non_transient() {
+        let mut n = 0;
+        let out = with_serial_retry(
+            || {
+                n += 1;
+                Err("no such device".to_string()) // not a transient signal
+            },
+            |_| {},
+        );
+        assert!(out.starts_with("ERROR:"));
+        assert_eq!(n, 1);
+    }
 }
 
 pub fn stream_lines(
@@ -201,7 +259,11 @@ pub fn stream_lines(
     let baud_val = resolve_baud(baud)?;
     let sp = open_port(&port_str, baud_val)?;
     let deadline = timeout_s.map(|s| Instant::now() + Duration::from_secs_f64(s));
-    Ok(LineIter { sp, deadline, buf: Vec::new() })
+    Ok(LineIter {
+        sp,
+        deadline,
+        buf: Vec::new(),
+    })
 }
 
 struct LineIter {

@@ -133,7 +133,11 @@ pub fn call_repair(
     let resp = client
         .post(format!("{server_url}/repair"))
         .header("Authorization", format!("Bearer {token}"))
-        .json(&RepairRequest { serial_output, build_id, board })
+        .json(&RepairRequest {
+            serial_output,
+            build_id,
+            board,
+        })
         .timeout(Duration::from_secs(60))
         .send()
         .context("failed to reach diagnosis server")?;
@@ -147,7 +151,8 @@ pub fn call_repair(
         return Err(anyhow!("server returned HTTP {status}: {body}"));
     }
 
-    resp.json::<RepairOutput>().context("failed to parse repair response")
+    resp.json::<RepairOutput>()
+        .context("failed to parse repair response")
 }
 
 fn is_unauthorized(e: &anyhow::Error) -> bool {

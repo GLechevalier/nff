@@ -46,8 +46,7 @@ fn open_stream(
 /// Render one SSE frame. Returns false to signal the stream is done. `replies`
 /// accumulates agent prose so --no-stream can print the answer at the end.
 fn render(event: &str, payload: &str, no_stream: bool, replies: &mut Vec<String>) -> bool {
-    let data: serde_json::Value =
-        serde_json::from_str(payload).unwrap_or(serde_json::Value::Null);
+    let data: serde_json::Value = serde_json::from_str(payload).unwrap_or(serde_json::Value::Null);
 
     match event {
         "queued" => {
@@ -80,13 +79,19 @@ fn render(event: &str, payload: &str, no_stream: bool, replies: &mut Vec<String>
             true
         }
         "error" => {
-            let msg = data.get("message").and_then(|m| m.as_str()).unwrap_or(payload);
+            let msg = data
+                .get("message")
+                .and_then(|m| m.as_str())
+                .unwrap_or(payload);
             eprintln!("{}", style(format!("✗ {msg}")).red());
             true
         }
         "done" => {
             if !data.get("ok").and_then(|o| o.as_bool()).unwrap_or(true) {
-                let err = data.get("error").and_then(|e| e.as_str()).unwrap_or("run failed");
+                let err = data
+                    .get("error")
+                    .and_then(|e| e.as_str())
+                    .unwrap_or("run failed");
                 eprintln!("{}", style(format!("✗ agent run failed: {err}")).red());
             }
             false
@@ -146,7 +151,10 @@ pub fn run(args: &AgentArgs) -> Result<()> {
         .mcp_url
         .clone()
         .unwrap_or_else(|| config.agent.local_mcp_url.clone());
-    let project = args.project.clone().or_else(|| config.agent.project_id.clone());
+    let project = args
+        .project
+        .clone()
+        .or_else(|| config.agent.project_id.clone());
 
     let access_token = config
         .diagnosis
@@ -164,7 +172,12 @@ pub fn run(args: &AgentArgs) -> Result<()> {
     // callbacks would then fail (the cloud-side work still streams fine).
     if !mcp_url.trim().is_empty() {
         let probe = Client::new();
-        if probe.get(&mcp_url).timeout(Duration::from_secs(2)).send().is_err() {
+        if probe
+            .get(&mcp_url)
+            .timeout(Duration::from_secs(2))
+            .send()
+            .is_err()
+        {
             eprintln!(
                 "{}",
                 style(format!(
@@ -184,7 +197,13 @@ pub fn run(args: &AgentArgs) -> Result<()> {
         .build()
         .context("failed to build http client")?;
 
-    let mut resp = open_stream(&client, &agent_url, &access_token, project.as_deref(), &body)?;
+    let mut resp = open_stream(
+        &client,
+        &agent_url,
+        &access_token,
+        project.as_deref(),
+        &body,
+    )?;
 
     // 401 → refresh the diagnosis token once and retry, mirroring `nff repair`.
     if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
@@ -196,7 +215,13 @@ pub fn run(args: &AgentArgs) -> Result<()> {
         match tools::auth::refresh_tokens(&diag_url, &refresh) {
             Ok(new) => {
                 tools::config::set_diagnosis_tokens(&new.access_token, &new.refresh_token)?;
-                resp = open_stream(&client, &agent_url, &new.access_token, project.as_deref(), &body)?;
+                resp = open_stream(
+                    &client,
+                    &agent_url,
+                    &new.access_token,
+                    project.as_deref(),
+                    &body,
+                )?;
             }
             Err(_) => {
                 tools::config::clear_diagnosis_tokens()?;
