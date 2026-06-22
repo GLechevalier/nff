@@ -77,104 +77,98 @@ jobs:
           git push origin main
           git push origin "v${{ steps.bump.outputs.new_version }}"
 
-  # ── 3. Build platform wheels ────────────────────────────────────────────────
-  build-wheels:
+  # ── 3. Build the pip-installable wheel ──────────────────────────────────────
+  # The package is a pure-Python hatchling project, so one universal
+  # (py3-none-any) wheel installs everywhere — build it with the standard PyPA
+  # build, NOT maturin (maturin expects a Rust/mixed project and failed here).
+  build-wheel:
+    needs: bump-version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v${{ needs.bump-version.outputs.new_version }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build sdist + wheel
+        run: |
+          python -m pip install --upgrade build
+          python -m build --outdir dist
+      - name: Upload dist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/*
+
+  # ── 4. Build standalone Rust binaries (the single-binary downloads) ─────────
+  build-binaries:
     needs: bump-version
     strategy:
       matrix:
         include:
           - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
             binary: nff
+            asset: nff-linux-x64
           - os: windows-latest
-            target: x86_64-pc-windows-msvc
             binary: nff.exe
+            asset: nff-windows-x64.exe
           - os: macos-latest
-            target: aarch64-apple-darwin
             binary: nff
-
+            asset: nff-macos-arm64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: v${{ needs.bump-version.outputs.new_version }}
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Build wheel with maturin
-        uses: PyO3/maturin-action@v1
-        with:
-          command: build
-          args: --release --target ${{ matrix.target }} --out dist
-          manylinux: auto
-
-      - name: Upload wheel artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: wheel-${{ matrix.os }}
-          path: dist/*.whl
-
-      - name: Extract standalone binary from wheel
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev
+      - name: Build release binary
+        run: cargo build --release
+        working-directory: nff-rs
+      - name: Stage binary
         shell: bash
-        run: |
-          pip install wheel
-          python -c "
-          import zipfile, glob, shutil, os, pathlib
-          whl = glob.glob('dist/*.whl')[0]
-          with zipfile.ZipFile(whl) as z:
-              names = z.namelist()
-              binary = next(n for n in names if n.endswith('/${{ matrix.binary }}') or n.endswith('\\\\${{ matrix.binary }}'))
-              data = z.read(binary)
-          out = 'standalone-${{ matrix.binary }}'
-          pathlib.Path(out).write_bytes(data)
-          print('Extracted', out, len(data), 'bytes')
-          "
-          ls -la standalone-* 2>/dev/null || dir standalone-* 2>/dev/null || true
-
-      - name: Upload standalone binary artifact
+        run: cp "nff-rs/target/release/${{ matrix.binary }}" "${{ matrix.asset }}"
+      - name: Upload binary artifact
         uses: actions/upload-artifact@v4
         with:
-          name: binary-${{ matrix.os }}
-          path: standalone-${{ matrix.binary }}
+          name: ${{ matrix.asset }}
+          path: ${{ matrix.asset }}
 
-  # ── 4. Publish to PyPI ──────────────────────────────────────────────────────
+  # ── 5. Publish the wheel to PyPI (keeps `pip install nff` working) ───────────
   publish-pypi:
-    needs: [bump-version, build-wheels]
+    needs: [bump-version, build-wheel]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with:
-          pattern: wheel-*
-          merge-multiple: true
+          name: dist
           path: dist/
-
-      - uses: PyO3/maturin-action@v1
+      - uses: actions/setup-python@v5
         with:
-          command: upload
-          args: --non-interactive --skip-existing dist/*.whl
+          python-version: "3.12"
+      - name: Upload to PyPI
         env:
-          MATURIN_PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+        run: |
+          python -m pip install --upgrade twine
+          python -m twine upload --skip-existing dist/*
 
-  # ── 5. Create GitHub Release with standalone binaries ──────────────────────
+  # ── 6. Create GitHub Release with standalone binaries ──────────────────────
   publish-release:
-    needs: [bump-version, build-wheels]
+    needs: [bump-version, build-binaries]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/download-artifact@v4
         with:
-          pattern: binary-*
+          pattern: nff-*
           merge-multiple: true
           path: binaries/
-
-      - name: Rename binaries with platform suffix
-        run: |
-          mv binaries/nff      binaries/nff-linux-x64    2>/dev/null || true
-          mv binaries/nff.exe  binaries/nff-windows-x64.exe 2>/dev/null || true
-
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
