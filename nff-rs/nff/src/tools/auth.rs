@@ -32,8 +32,9 @@ pub fn percent_encode(s: &str) -> String {
     let mut out = String::with_capacity(s.len() * 3);
     for byte in s.bytes() {
         match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9'
-            | b'-' | b'_' | b'.' | b'~' => out.push(byte as char),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(byte as char)
+            }
             b => out.push_str(&format!("%{b:02X}")),
         }
     }
@@ -181,7 +182,9 @@ pub fn refresh_tokens(server_url: &str, refresh_token: &str) -> Result<TokenResp
         return Err(anyhow!("token refresh failed (HTTP {})", resp.status()));
     }
 
-    let data: RefreshPayload = resp.json().context("invalid refresh response from server")?;
+    let data: RefreshPayload = resp
+        .json()
+        .context("invalid refresh response from server")?;
     Ok(TokenResponse {
         access_token: data.access_token,
         refresh_token: data.refresh_token,

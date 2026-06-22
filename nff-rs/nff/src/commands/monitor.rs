@@ -3,8 +3,7 @@ use crate::tools::serial;
 use anyhow::Result;
 
 pub fn run(args: &MonitorArgs) -> Result<()> {
-    let port = serial::resolve_port(args.port.as_deref())
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let port = serial::resolve_port(args.port.as_deref()).map_err(|e| anyhow::anyhow!("{e}"))?;
     let baud = serial::resolve_baud(args.baud).unwrap_or(9600);
 
     eprintln!("nff monitor  —  Ctrl+C to exit");

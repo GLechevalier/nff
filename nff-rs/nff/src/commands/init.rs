@@ -5,11 +5,11 @@ use std::io::{self, BufRead, Write};
 use which::which;
 
 const SIM_BOARDS: &[(&str, &str)] = &[
-    ("arduino:avr:uno",         "Arduino Uno"),
-    ("arduino:avr:mega",        "Arduino Mega 2560"),
-    ("arduino:avr:nano",        "Arduino Nano"),
-    ("arduino:avr:leonardo",    "Arduino Leonardo"),
-    ("esp32:esp32:esp32",       "ESP32 DevKit V1"),
+    ("arduino:avr:uno", "Arduino Uno"),
+    ("arduino:avr:mega", "Arduino Mega 2560"),
+    ("arduino:avr:nano", "Arduino Nano"),
+    ("arduino:avr:leonardo", "Arduino Leonardo"),
+    ("esp32:esp32:esp32", "ESP32 DevKit V1"),
     ("esp8266:esp8266:generic", "ESP8266"),
 ];
 
@@ -22,6 +22,14 @@ pub fn run(args: &InitArgs) -> Result<()> {
     }
 
     ensure_arduino_cli();
+
+    // Install the onboarding toolchain (esp32 core + PubSubClient + nff lib) so
+    // a bootstrap sketch with `#include <nff.h>` compiles. Best-effort: a network
+    // hiccup shouldn't block configuring the board.
+    println!("  Ensuring build toolchain (esp32 core + nff library)…");
+    if let Err(e) = installer::ensure_onboarding_toolchain() {
+        println!("  ⚠  onboarding toolchain incomplete: {e}");
+    }
 
     // Guard against overwriting existing config
     if config::exists() && !args.force {
@@ -81,10 +89,17 @@ fn pick_mode() -> Result<u32> {
     print!("Select mode [1]: ");
     io::stdout().flush()?;
 
-    let line = io::stdin().lock().lines().next()
+    let line = io::stdin()
+        .lock()
+        .lines()
+        .next()
         .unwrap_or_else(|| Ok(String::new()))?;
     let trimmed = line.trim();
-    if trimmed == "2" { Ok(2) } else { Ok(1) }
+    if trimmed == "2" {
+        Ok(2)
+    } else {
+        Ok(1)
+    }
 }
 
 fn pick_sim_board() -> Result<String> {
@@ -97,7 +112,10 @@ fn pick_sim_board() -> Result<String> {
     print!("Select board [1]: ");
     io::stdout().flush()?;
 
-    let line = io::stdin().lock().lines().next()
+    let line = io::stdin()
+        .lock()
+        .lines()
+        .next()
         .unwrap_or_else(|| Ok("1".to_string()))?;
     let idx: usize = line.trim().parse().unwrap_or(1);
     let idx = idx.max(1).min(SIM_BOARDS.len()) - 1;
@@ -115,7 +133,10 @@ fn pick_device(devices: &[boards::DetectedDevice]) -> Result<boards::DetectedDev
     print!("Select board [1]: ");
     io::stdout().flush()?;
 
-    let line = io::stdin().lock().lines().next()
+    let line = io::stdin()
+        .lock()
+        .lines()
+        .next()
         .unwrap_or_else(|| Ok("1".to_string()))?;
     let idx: usize = line.trim().parse().unwrap_or(1);
     let idx = idx.max(1).min(devices.len()) - 1;
@@ -150,20 +171,22 @@ fn run_sim_init(baud: u32, force: bool) -> Result<()> {
     let diagram_path = cwd.join("diagram.json");
 
     let paths = [&toml_path, &diagram_path];
-    let existing: Vec<_> = paths.iter()
-        .filter(|p| p.exists())
-        .collect();
+    let existing: Vec<_> = paths.iter().filter(|p| p.exists()).collect();
 
     if !existing.is_empty() && !force {
         for p in &existing {
-            println!("  ⚠  {} already exists.", p.file_name().unwrap_or_default().to_string_lossy());
+            println!(
+                "  ⚠  {} already exists.",
+                p.file_name().unwrap_or_default().to_string_lossy()
+            );
         }
         println!("    Pass --force to overwrite.");
         std::process::exit(1);
     }
 
     // Find board name from SIM_BOARDS
-    let board_name = SIM_BOARDS.iter()
+    let board_name = SIM_BOARDS
+        .iter()
         .find(|&&(f, _)| f == fqbn)
         .map(|&(_, n)| n)
         .unwrap_or("Unknown");
@@ -224,7 +247,16 @@ fn register_mcp_claude_code() {
     };
 
     let result = std::process::Command::new(&claude)
-        .args(["mcp", "add", "--scope", "user", "--transport", "http", "nff", MCP_URL])
+        .args([
+            "mcp",
+            "add",
+            "--scope",
+            "user",
+            "--transport",
+            "http",
+            "nff",
+            MCP_URL,
+        ])
         .output();
 
     match result {

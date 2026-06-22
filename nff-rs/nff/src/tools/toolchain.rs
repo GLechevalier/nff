@@ -1,9 +1,24 @@
 use std::collections::BTreeMap;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::time::Duration;
 use thiserror::Error;
+use wait_timeout::ChildExt;
 use which::which;
+
+use crate::tools::retry;
+
+// Command timeouts (seconds). The generic RUN_TIMEOUT covers short commands; a
+// cold ESP32 first build easily exceeds 120s, so compile gets its own ceiling.
+const RUN_TIMEOUT: u64 = 120;
+const COMPILE_TIMEOUT: u64 = 600;
+const UPLOAD_TIMEOUT: u64 = 180;
+
+// Compile uses the default backoff; upload uses a longer one because the board
+// re-enumerates after arduino-cli's auto-reset.
+pub const COMPILE_BACKOFF: &[f64] = retry::DEFAULT_BACKOFF;
+pub const UPLOAD_BACKOFF: &[f64] = &[2.0, 4.0];
 
 #[derive(Error, Debug)]
 pub enum ToolchainError {
@@ -31,9 +46,22 @@ impl RunResult {
         let mut parts = Vec::new();
         let s = self.stdout.trim();
         let e = self.stderr.trim();
-        if !s.is_empty() { parts.push(s); }
-        if !e.is_empty() { parts.push(e); }
+        if !s.is_empty() {
+            parts.push(s);
+        }
+        if !e.is_empty() {
+            parts.push(e);
+        }
         parts.join("\n")
+    }
+}
+
+impl retry::RetryOutcome for RunResult {
+    fn succeeded(&self) -> bool {
+        self.success
+    }
+    fn text(&self) -> String {
+        self.output()
     }
 }
 
@@ -45,15 +73,26 @@ pub fn find_arduino_cli() -> Option<PathBuf> {
     {
         let base = std::env::var("LOCALAPPDATA")
             .map(PathBuf::from)
-            .unwrap_or_else(|_| dirs::home_dir().unwrap_or_default().join("AppData").join("Local"));
-        let candidate = base.join("Programs").join("arduino-cli").join("arduino-cli.exe");
+            .unwrap_or_else(|_| {
+                dirs::home_dir()
+                    .unwrap_or_default()
+                    .join("AppData")
+                    .join("Local")
+            });
+        let candidate = base
+            .join("Programs")
+            .join("arduino-cli")
+            .join("arduino-cli.exe");
         if candidate.exists() {
             return Some(candidate);
         }
     }
     #[cfg(not(windows))]
     {
-        let candidate = dirs::home_dir()?.join(".local").join("bin").join("arduino-cli");
+        let candidate = dirs::home_dir()?
+            .join(".local")
+            .join("bin")
+            .join("arduino-cli");
         if candidate.exists() {
             return Some(candidate);
         }
@@ -73,15 +112,26 @@ pub fn find_wokwi_cli() -> Option<PathBuf> {
     {
         let base = std::env::var("LOCALAPPDATA")
             .map(PathBuf::from)
-            .unwrap_or_else(|_| dirs::home_dir().unwrap_or_default().join("AppData").join("Local"));
-        let candidate = base.join("Programs").join("wokwi-cli").join("wokwi-cli.exe");
+            .unwrap_or_else(|_| {
+                dirs::home_dir()
+                    .unwrap_or_default()
+                    .join("AppData")
+                    .join("Local")
+            });
+        let candidate = base
+            .join("Programs")
+            .join("wokwi-cli")
+            .join("wokwi-cli.exe");
         if candidate.exists() {
             return Some(candidate);
         }
     }
     #[cfg(not(windows))]
     {
-        let candidate = dirs::home_dir()?.join(".local").join("bin").join("wokwi-cli");
+        let candidate = dirs::home_dir()?
+            .join(".local")
+            .join("bin")
+            .join("wokwi-cli");
         if candidate.exists() {
             return Some(candidate);
         }
@@ -93,14 +143,22 @@ pub fn arduino_cli_version() -> Option<String> {
     let exe = find_arduino_cli()?;
     let out = Command::new(&exe).arg("version").output().ok()?;
     let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    if s.is_empty() { None } else { Some(s) }
+    if s.is_empty() {
+        None
+    } else {
+        Some(s)
+    }
 }
 
 pub fn wokwi_cli_version() -> Option<String> {
     let exe = find_wokwi_cli()?;
     let out = Command::new(&exe).arg("--version").output().ok()?;
     let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    if s.is_empty() { None } else { Some(s) }
+    if s.is_empty() {
+        None
+    } else {
+        Some(s)
+    }
 }
 
 pub fn esptool_version() -> Option<String> {
@@ -109,16 +167,23 @@ pub fn esptool_version() -> Option<String> {
         if let Ok(out) = Command::new(&exe).arg("version").output() {
             if out.status.success() {
                 let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                if !s.is_empty() { return Some(s); }
+                if !s.is_empty() {
+                    return Some(s);
+                }
             }
         }
     }
     // Fallback: python -m esptool
     let python = which("python").or_else(|_| which("python3")).ok()?;
-    let out = Command::new(&python).args(["-m", "esptool", "version"]).output().ok()?;
+    let out = Command::new(&python)
+        .args(["-m", "esptool", "version"])
+        .output()
+        .ok()?;
     if out.status.success() {
         let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
-        if !s.is_empty() { return Some(s); }
+        if !s.is_empty() {
+            return Some(s);
+        }
     }
     None
 }
@@ -141,13 +206,18 @@ pub fn write_sketch(code: &str, sketch_dir_opt: Option<&Path>) -> Result<PathBuf
 pub fn elf_path_for(sketch_dir: &Path, fqbn: &str) -> PathBuf {
     let fqbn_dir = fqbn.replace(':', ".");
     let name = sketch_dir.file_name().unwrap_or_default().to_string_lossy();
-    sketch_dir.join("build").join(&fqbn_dir).join(format!("{name}.ino.elf"))
+    sketch_dir
+        .join("build")
+        .join(&fqbn_dir)
+        .join(format!("{name}.ino.elf"))
 }
 
 fn require_arduino_cli() -> Result<PathBuf, ToolchainError> {
-    find_arduino_cli().ok_or_else(|| ToolchainError::NotFound(
-        "arduino-cli not found. Install from https://arduino.github.io/arduino-cli".into(),
-    ))
+    find_arduino_cli().ok_or_else(|| {
+        ToolchainError::NotFound(
+            "arduino-cli not found. Install from https://arduino.github.io/arduino-cli".into(),
+        )
+    })
 }
 
 /// Return the path to the compiled ELF, handling arduino-cli's content-hash cache.
@@ -162,33 +232,51 @@ pub fn locate_compiled_elf(sketch_dir: &Path, fqbn: &str) -> Result<PathBuf, Too
         return Ok(expected);
     }
     let exe = require_arduino_cli()?;
-    let name = sketch_dir.file_name().unwrap_or_default().to_string_lossy().into_owned();
+    let name = sketch_dir
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into_owned();
     let out = Command::new(&exe)
-        .args(["compile", "--fqbn", fqbn, "--json",
-               sketch_dir.to_str().unwrap_or("")])
+        .args([
+            "compile",
+            "--fqbn",
+            fqbn,
+            "--json",
+            sketch_dir.to_str().unwrap_or(""),
+        ])
         .output()?;
     let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap_or_default();
     let build_path = json["builder_result"]["build_path"]
         .as_str()
-        .ok_or_else(|| ToolchainError::NotFound(format!(
-            "ELF not at {} and arduino-cli --json gave no build_path",
-            expected.display()
-        )))?;
+        .ok_or_else(|| {
+            ToolchainError::NotFound(format!(
+                "ELF not at {} and arduino-cli --json gave no build_path",
+                expected.display()
+            ))
+        })?;
     let elf = PathBuf::from(build_path).join(format!("{name}.ino.elf"));
     if elf.is_file() {
         Ok(elf)
     } else {
         Err(ToolchainError::NotFound(format!(
             "ELF not found (tried {} and {})",
-            expected.display(), elf.display()
+            expected.display(),
+            elf.display()
         )))
     }
 }
 
-fn run(cmd: &[&str]) -> Result<RunResult, ToolchainError> {
-    let output = Command::new(cmd[0])
+/// Run a command with a wall-clock timeout. stdout/stderr are drained on threads
+/// so a full pipe buffer can never deadlock the wait. On timeout the child is
+/// killed and a failed RunResult with rc=124 is returned (mirrors the Python
+/// `_run` convention) so the retry layer can classify it as transient.
+fn run_timed(cmd: &[&str], timeout_secs: u64) -> Result<RunResult, ToolchainError> {
+    let mut child = Command::new(cmd[0])
         .args(&cmd[1..])
-        .output()
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
                 ToolchainError::NotFound(cmd[0].to_string())
@@ -196,12 +284,67 @@ fn run(cmd: &[&str]) -> Result<RunResult, ToolchainError> {
                 ToolchainError::Io(e)
             }
         })?;
-    Ok(RunResult {
-        success: output.status.success(),
-        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-        returncode: output.status.code().unwrap_or(-1),
-    })
+
+    let mut out_pipe = child.stdout.take().expect("stdout piped");
+    let mut err_pipe = child.stderr.take().expect("stderr piped");
+    let out_handle = std::thread::spawn(move || {
+        let mut s = String::new();
+        let _ = out_pipe.read_to_string(&mut s);
+        s
+    });
+    let err_handle = std::thread::spawn(move || {
+        let mut s = String::new();
+        let _ = err_pipe.read_to_string(&mut s);
+        s
+    });
+
+    match child
+        .wait_timeout(Duration::from_secs(timeout_secs))
+        .map_err(ToolchainError::Io)?
+    {
+        Some(status) => {
+            let stdout = out_handle.join().unwrap_or_default();
+            let stderr = err_handle.join().unwrap_or_default();
+            Ok(RunResult {
+                success: status.success(),
+                stdout,
+                stderr,
+                returncode: status.code().unwrap_or(-1),
+            })
+        }
+        None => {
+            let _ = child.kill();
+            let _ = child.wait();
+            let stdout = out_handle.join().unwrap_or_default();
+            let _ = err_handle.join();
+            Ok(RunResult {
+                success: false,
+                stdout,
+                stderr: format!("Command timed out after {timeout_secs}s: {}", cmd[0]),
+                returncode: 124,
+            })
+        }
+    }
+}
+
+/// `run_timed` mapping any hard spawn error into a failed RunResult, so a retry
+/// driver can branch purely on the result (a missing binary classifies as
+/// non-transient and fails fast).
+fn run_timed_result(cmd: &[&str], timeout_secs: u64) -> RunResult {
+    match run_timed(cmd, timeout_secs) {
+        Ok(r) => r,
+        Err(e) => RunResult {
+            success: false,
+            stdout: String::new(),
+            stderr: e.to_string(),
+            returncode: -1,
+        },
+    }
+}
+
+/// Short-command runner (esptool, etc.) with the generic timeout, no retry.
+fn run(cmd: &[&str]) -> Result<RunResult, ToolchainError> {
+    run_timed(cmd, RUN_TIMEOUT)
 }
 
 /// arduino-cli `--build-property` value that bakes the fqbn into the firmware as
@@ -221,44 +364,83 @@ pub fn compile_sketch(sketch_dir: &Path, fqbn: &str) -> Result<RunResult, Toolch
         .to_path_buf();
     std::fs::create_dir_all(&output_dir)?;
     let build_prop = fqbn_build_property(fqbn);
-    let cmd_strs = [
-        exe.to_str().unwrap_or("arduino-cli"),
-        "compile",
-        "--fqbn", fqbn,
-        "--build-property", &build_prop,
-        "--output-dir", output_dir.to_str().unwrap_or(""),
-        sketch_dir.to_str().unwrap_or(""),
-    ];
-    run(&cmd_strs)
+    let exe_s = exe.to_str().unwrap_or("arduino-cli").to_string();
+    let out_s = output_dir.to_str().unwrap_or("").to_string();
+    let sk_s = sketch_dir.to_str().unwrap_or("").to_string();
+    // Retry transient toolchain hiccups; a genuine compile error fails fast.
+    Ok(retry::run_with_retry(
+        || {
+            let cmd = [
+                exe_s.as_str(),
+                "compile",
+                "--fqbn",
+                fqbn,
+                "--build-property",
+                &build_prop,
+                "--output-dir",
+                &out_s,
+                &sk_s,
+            ];
+            run_timed_result(&cmd, COMPILE_TIMEOUT)
+        },
+        retry::DEFAULT_BACKOFF,
+        |_, _| {},
+        retry::real_sleep,
+    ))
 }
 
-pub fn upload_sketch(sketch_dir: &Path, fqbn: &str, port: &str) -> Result<RunResult, ToolchainError> {
+pub fn upload_sketch(
+    sketch_dir: &Path,
+    fqbn: &str,
+    port: &str,
+) -> Result<RunResult, ToolchainError> {
     let exe = require_arduino_cli()?;
-    let cmd_strs = [
-        exe.to_str().unwrap_or("arduino-cli"),
-        "upload",
-        "--fqbn", fqbn,
-        "--port", port,
-        sketch_dir.to_str().unwrap_or(""),
-    ];
-    run(&cmd_strs)
+    let exe_s = exe.to_str().unwrap_or("arduino-cli").to_string();
+    let sk_s = sketch_dir.to_str().unwrap_or("").to_string();
+    Ok(retry::run_with_retry(
+        || {
+            let cmd = [
+                exe_s.as_str(),
+                "upload",
+                "--fqbn",
+                fqbn,
+                "--port",
+                port,
+                &sk_s,
+            ];
+            run_timed_result(&cmd, UPLOAD_TIMEOUT)
+        },
+        UPLOAD_BACKOFF,
+        |_, _| {},
+        retry::real_sleep,
+    ))
 }
+
+// (compile/upload backoff constants are defined near the top of the module)
 
 pub struct ProcessStream {
     cmd: Vec<String>,
     pub returncode: Option<i32>,
+    /// Captured stderr (arduino-cli prints upload/port faults here). Kept so the
+    /// retry classifier and the caller can both see it, instead of letting it
+    /// leak straight to the terminal where the classifier can't reach it.
+    pub stderr: String,
 }
 
 impl ProcessStream {
     pub fn new(cmd: Vec<String>) -> Self {
-        ProcessStream { cmd, returncode: None }
+        ProcessStream {
+            cmd,
+            returncode: None,
+            stderr: String::new(),
+        }
     }
 
     pub fn run(&mut self) -> Result<impl Iterator<Item = String> + '_, ToolchainError> {
         let mut child = Command::new(&self.cmd[0])
             .args(&self.cmd[1..])
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
+            .stderr(Stdio::piped())
             .spawn()
             .map_err(|e| {
                 if e.kind() == std::io::ErrorKind::NotFound {
@@ -269,14 +451,83 @@ impl ProcessStream {
             })?;
 
         let stdout = child.stdout.take().unwrap();
+        let mut err_pipe = child.stderr.take().unwrap();
+        // Drain stderr on a thread so a full pipe can't deadlock the stdout read.
+        let err_handle = std::thread::spawn(move || {
+            let mut s = String::new();
+            let _ = err_pipe.read_to_string(&mut s);
+            s
+        });
         let lines: Vec<String> = BufReader::new(stdout)
             .lines()
             .map_while(Result::ok)
             .collect();
         let status = child.wait()?;
         self.returncode = status.code();
+        self.stderr = err_handle.join().unwrap_or_default();
         Ok(lines.into_iter())
     }
+}
+
+/// Consume one stream attempt: echo each stdout line live via `emit`, then echo
+/// captured stderr too, returning `(returncode, combined_output)` for the retry
+/// classifier. Mirrors the Python `run_stream_attempt`.
+pub fn run_stream_attempt(stream: &mut ProcessStream, emit: &mut dyn FnMut(&str)) -> (i32, String) {
+    let mut captured: Vec<String> = Vec::new();
+    match stream.run() {
+        Ok(iter) => {
+            for line in iter {
+                emit(&line);
+                captured.push(line);
+            }
+        }
+        Err(e) => {
+            let m = format!("ERROR: {e}");
+            emit(&m);
+            captured.push(m);
+            return (-1, captured.join("\n"));
+        }
+    }
+    let err = stream.stderr.clone();
+    if !err.trim().is_empty() {
+        for line in err.lines() {
+            emit(line);
+        }
+        captured.push(err);
+    }
+    (stream.returncode.unwrap_or(0), captured.join("\n"))
+}
+
+/// Run a live-streaming arduino-cli command with transient-failure retry. A fresh
+/// `ProcessStream` is built per attempt; on a transient non-zero result a banner
+/// is emitted and a new attempt starts. Returns the final returncode.
+pub fn stream_with_retry(
+    mut make_stream: impl FnMut() -> Result<ProcessStream, ToolchainError>,
+    emit: &mut dyn FnMut(&str),
+    backoff: &[f64],
+) -> i32 {
+    let retries = backoff.len();
+    for i in 0..=retries {
+        let mut stream = match make_stream() {
+            Ok(s) => s,
+            Err(e) => {
+                emit(&format!("ERROR: {e}"));
+                return -1;
+            }
+        };
+        let (rc, out) = run_stream_attempt(&mut stream, emit);
+        if rc == 0 || i == retries || !retry::is_transient(&out) {
+            return rc;
+        }
+        let delay = backoff[i.min(backoff.len().saturating_sub(1))];
+        emit(&format!(
+            "[nff] transient failure (rc={rc}); retrying in {delay:.0}s (attempt {}/{})…",
+            i + 2,
+            retries + 1
+        ));
+        retry::real_sleep(delay);
+    }
+    -1
 }
 
 pub fn stream_compile(sketch_dir: &Path, fqbn: &str) -> Result<ProcessStream, ToolchainError> {
@@ -289,14 +540,21 @@ pub fn stream_compile(sketch_dir: &Path, fqbn: &str) -> Result<ProcessStream, To
     Ok(ProcessStream::new(vec![
         exe.to_str().unwrap_or("arduino-cli").to_string(),
         "compile".into(),
-        "--fqbn".into(), fqbn.into(),
-        "--build-property".into(), fqbn_build_property(fqbn),
-        "--output-dir".into(), output_dir.to_str().unwrap_or("").to_string(),
+        "--fqbn".into(),
+        fqbn.into(),
+        "--build-property".into(),
+        fqbn_build_property(fqbn),
+        "--output-dir".into(),
+        output_dir.to_str().unwrap_or("").to_string(),
         sketch_dir.to_str().unwrap_or("").to_string(),
     ]))
 }
 
-pub fn stream_upload(sketch_dir: &Path, fqbn: &str, port: &str) -> Result<ProcessStream, ToolchainError> {
+pub fn stream_upload(
+    sketch_dir: &Path,
+    fqbn: &str,
+    port: &str,
+) -> Result<ProcessStream, ToolchainError> {
     let exe = require_arduino_cli()?;
     let input_dir = elf_path_for(sketch_dir, fqbn)
         .parent()
@@ -305,9 +563,12 @@ pub fn stream_upload(sketch_dir: &Path, fqbn: &str, port: &str) -> Result<Proces
     Ok(ProcessStream::new(vec![
         exe.to_str().unwrap_or("arduino-cli").to_string(),
         "upload".into(),
-        "--fqbn".into(), fqbn.into(),
-        "--port".into(), port.into(),
-        "--input-dir".into(), input_dir.to_str().unwrap_or("").to_string(),
+        "--fqbn".into(),
+        fqbn.into(),
+        "--port".into(),
+        port.into(),
+        "--input-dir".into(),
+        input_dir.to_str().unwrap_or("").to_string(),
         sketch_dir.to_str().unwrap_or("").to_string(),
     ]))
 }
@@ -355,9 +616,13 @@ pub fn flash_sketch(target_dir: &Path, fqbn: &str, port: &str) -> String {
 
     let mut sections = vec!["OK: flash complete".to_string()];
     let co = compile_result.output();
-    if !co.is_empty() { sections.push(format!("--- compile ---\n{co}")); }
+    if !co.is_empty() {
+        sections.push(format!("--- compile ---\n{co}"));
+    }
     let uo = upload_result.output();
-    if !uo.is_empty() { sections.push(format!("--- upload ---\n{uo}")); }
+    if !uo.is_empty() {
+        sections.push(format!("--- upload ---\n{uo}"));
+    }
     sections.join("\n")
 }
 
@@ -417,7 +682,12 @@ impl CompileResult {
         let artifacts: serde_json::Map<String, serde_json::Value> = self
             .artifacts
             .iter()
-            .map(|(k, v)| (k.clone(), serde_json::Value::String(v.display().to_string())))
+            .map(|(k, v)| {
+                (
+                    k.clone(),
+                    serde_json::Value::String(v.display().to_string()),
+                )
+            })
             .collect();
         serde_json::json!({
             "ok": self.ok,
@@ -435,7 +705,9 @@ impl CompileResult {
 fn find_by_ext(root: &Path, ext: &str) -> Option<PathBuf> {
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
-        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
@@ -458,7 +730,11 @@ fn find_by_ext(root: &Path, ext: &str) -> Option<PathBuf> {
 /// stray build layout still resolves instead of returning nothing.
 pub fn discover_artifacts(sketch_dir: &Path, fqbn: &str) -> BTreeMap<String, PathBuf> {
     let bdir = build_dir(sketch_dir, fqbn);
-    let name = sketch_dir.file_name().unwrap_or_default().to_string_lossy().into_owned();
+    let name = sketch_dir
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into_owned();
     let mut found: BTreeMap<String, PathBuf> = BTreeMap::new();
     for (kind, suffix) in ARTIFACT_SUFFIXES {
         let candidate = bdir.join(format!("{name}{suffix}"));
@@ -471,11 +747,13 @@ pub fn discover_artifacts(sketch_dir: &Path, fqbn: &str) -> BTreeMap<String, Pat
             found.insert("elf".into(), p);
         }
     }
-    if !found.contains_key("merged_bin")
-        && !found.contains_key("bin")
-        && !found.contains_key("hex")
+    if !found.contains_key("merged_bin") && !found.contains_key("bin") && !found.contains_key("hex")
     {
-        for (ext, kind) in [(".merged.bin", "merged_bin"), (".bin", "bin"), (".hex", "hex")] {
+        for (ext, kind) in [
+            (".merged.bin", "merged_bin"),
+            (".bin", "bin"),
+            (".hex", "hex"),
+        ] {
             if let Some(p) = find_by_ext(sketch_dir, ext) {
                 found.insert(kind.into(), p);
                 break;
@@ -532,15 +810,28 @@ fn compile_to_build_path(sketch_dir: &Path, fqbn: &str) -> Result<RunResult, Too
     let bdir = build_dir(sketch_dir, fqbn);
     std::fs::create_dir_all(&bdir)?;
     let build_prop = fqbn_build_property(fqbn);
-    let cmd_strs = [
-        exe.to_str().unwrap_or("arduino-cli"),
-        "compile",
-        "--fqbn", fqbn,
-        "--build-property", &build_prop,
-        "--build-path", bdir.to_str().unwrap_or(""),
-        sketch_dir.to_str().unwrap_or(""),
-    ];
-    run(&cmd_strs)
+    let exe_s = exe.to_str().unwrap_or("arduino-cli").to_string();
+    let bdir_s = bdir.to_str().unwrap_or("").to_string();
+    let sk_s = sketch_dir.to_str().unwrap_or("").to_string();
+    Ok(retry::run_with_retry(
+        || {
+            let cmd = [
+                exe_s.as_str(),
+                "compile",
+                "--fqbn",
+                fqbn,
+                "--build-property",
+                &build_prop,
+                "--build-path",
+                &bdir_s,
+                &sk_s,
+            ];
+            run_timed_result(&cmd, COMPILE_TIMEOUT)
+        },
+        retry::DEFAULT_BACKOFF,
+        |_, _| {},
+        retry::real_sleep,
+    ))
 }
 
 /// Compile a sketch and report exactly what came out — never uploads. Accepts a
@@ -579,13 +870,13 @@ pub fn compile_only(
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
 
     #[test]
     fn write_sketch_creates_ino_file() {
-        let dir = std::env::temp_dir()
-            .join(format!("nff_tc_test_{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("nff_tc_test_{}", std::process::id()));
         let sketch_dir = write_sketch("void setup(){} void loop(){}", Some(&dir)).unwrap();
         assert_eq!(sketch_dir, dir);
         let ino_name = format!("{}.ino", dir.file_name().unwrap().to_string_lossy());
@@ -598,13 +889,18 @@ mod tests {
 
     #[test]
     fn write_sketch_overwrites_existing_file() {
-        let dir = std::env::temp_dir()
-            .join(format!("nff_tc_overwrite_{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("nff_tc_overwrite_{}", std::process::id()));
         write_sketch("void setup(){} void loop(){}", Some(&dir)).unwrap();
         write_sketch("// second write", Some(&dir)).unwrap();
-        let ino = dir.join(format!("{}.ino", dir.file_name().unwrap().to_string_lossy()));
+        let ino = dir.join(format!(
+            "{}.ino",
+            dir.file_name().unwrap().to_string_lossy()
+        ));
         let content = std::fs::read_to_string(&ino).unwrap();
-        assert!(content.contains("second write"), "second write should overwrite first");
+        assert!(
+            content.contains("second write"),
+            "second write should overwrite first"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -666,7 +962,10 @@ mod tests {
     fn compile_result_image_prefers_merged_bin() {
         let mut artifacts = BTreeMap::new();
         artifacts.insert("bin".to_string(), PathBuf::from("/x/a.ino.bin"));
-        artifacts.insert("merged_bin".to_string(), PathBuf::from("/x/a.ino.merged.bin"));
+        artifacts.insert(
+            "merged_bin".to_string(),
+            PathBuf::from("/x/a.ino.merged.bin"),
+        );
         let r = CompileResult {
             ok: true,
             fqbn: "esp32:esp32:esp32".into(),
@@ -721,8 +1020,10 @@ pub fn esptool_flash(port: &str, bin_path: &Path, baud: u32, address: &str) -> S
     };
 
     cmd.extend([
-        "--port".to_string(), port.to_string(),
-        "--baud".to_string(), baud.to_string(),
+        "--port".to_string(),
+        port.to_string(),
+        "--baud".to_string(),
+        baud.to_string(),
         "write_flash".to_string(),
         address.to_string(),
         bin_path.to_str().unwrap_or("").to_string(),
@@ -733,8 +1034,14 @@ pub fn esptool_flash(port: &str, bin_path: &Path, baud: u32, address: &str) -> S
         .collect();
 
     match run(&all) {
-        Ok(r) if r.success => format!("OK: esptool flash complete\n{}", r.output()).trim().to_string(),
-        Ok(r) => format!("ERROR: esptool failed (exit {}):\n{}", r.returncode, r.output()),
+        Ok(r) if r.success => format!("OK: esptool flash complete\n{}", r.output())
+            .trim()
+            .to_string(),
+        Ok(r) => format!(
+            "ERROR: esptool failed (exit {}):\n{}",
+            r.returncode,
+            r.output()
+        ),
         Err(e) => format!("ERROR: {e}"),
     }
 }

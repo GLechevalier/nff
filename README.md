@@ -17,7 +17,7 @@ LLM: [captures panic over OTA] → [reads registers + backtrace] → "Stack over
 **Supported boards:** ESP32 (CP210x / CH340) · ESP8266 (FTDI) · Arduino AVR (Uno, Mega, Nano, Leonardo)  
 STM32 and RP2040 support in progress — open a PR, adding a board is [two lines of code](CONTRIBUTING.md#adding-a-new-board).
 
-**Built in Python (Click + MCP).** This is the live implementation — `pip install nff` is a pure-Python install (hatchling), no toolchain required. A Rust port lives in `nff-rs/` but is currently **paused**; the Python package under `nff/nff/` is the source of truth and where new features (such as the port-free `compile` tool) land first.
+**Shipped as a single Rust binary.** The release artifact is the compiled `nff` binary built from `nff-rs/` — a self-contained executable with no Python runtime required. The Python package under `nff/nff/` remains as the reference/prototyping implementation (features are often prototyped there first, then ported to Rust at parity); both are kept in sync, version for version. The Rust port is at full feature parity (CLI commands, MCP server + OAuth proxy, the bench-loop hardening, and the `nff pi` Raspberry-Pi probe).
 
 ---
 
@@ -299,7 +299,7 @@ nff/
 │   │   ├── auth.py              # diagnosis-server token handling
 │   │   └── wokwi.py             # Wokwi runner + diagram generation
 │   └── skills/                  # /nff + /wokwi-diagram skills (ship with the package)
-├── nff-rs/                      # Rust port — PAUSED (not the source of truth)
+├── nff-rs/                      # Rust port — the shipped binary (full parity)
 ├── sketches/
 │   ├── blink_esp32/
 │   └── servo_button/
@@ -311,7 +311,7 @@ nff/
         └── wokwi-diagram.md     # /wokwi-diagram Claude Code skill
 ```
 
-The Python package under `nff/nff/` is the active development surface — every command and MCP tool runs from it. The Rust port in `nff-rs/` was an effort to ship a single compiled binary; it is currently **paused** and should not be treated as the source of truth. Edit the Python files (`mcp_server.py`, `tools/`, `commands/`) — that is where features land.
+The Rust crate under `nff-rs/nff/` is the **shipped binary** and is at full feature parity with the Python package — every CLI command and MCP tool runs natively (no Python runtime). Build it with `cargo build --release` (binary at `nff-rs/target/release/nff`). The Python package under `nff/nff/` is the reference/prototyping implementation and is kept in sync version-for-version; when you add a feature, land it in both so the two never drift.
 
 ---
 

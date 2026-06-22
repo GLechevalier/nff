@@ -13,7 +13,11 @@ fn nff() -> PathBuf {
     if path.ends_with("deps") {
         path.pop();
     }
-    if cfg!(windows) { path.join("nff.exe") } else { path.join("nff") }
+    if cfg!(windows) {
+        path.join("nff.exe")
+    } else {
+        path.join("nff")
+    }
 }
 
 fn run(args: &[&str]) -> std::process::Output {
@@ -38,7 +42,11 @@ fn stderr(out: &std::process::Output) -> String {
 #[test]
 fn version_flag_exits_successfully() {
     let out = run(&["--version"]);
-    assert!(out.status.success(), "nff --version failed:\n{}", stderr(&out));
+    assert!(
+        out.status.success(),
+        "nff --version failed:\n{}",
+        stderr(&out)
+    );
 }
 
 #[test]
@@ -62,8 +70,20 @@ fn help_flag_exits_successfully() {
 fn help_lists_all_top_level_commands() {
     let out = run(&["--help"]);
     let text = stdout(&out);
-    for cmd in &["init", "flash", "monitor", "doctor", "clean", "install-deps", "mcp", "wokwi"] {
-        assert!(text.contains(cmd), "nff --help missing command '{cmd}':\n{text}");
+    for cmd in &[
+        "init",
+        "flash",
+        "monitor",
+        "doctor",
+        "clean",
+        "install-deps",
+        "mcp",
+        "wokwi",
+    ] {
+        assert!(
+            text.contains(cmd),
+            "nff --help missing command '{cmd}':\n{text}"
+        );
     }
 }
 
@@ -109,7 +129,8 @@ fn wokwi_init_unsupported_board_fails() {
     assert!(!out.status.success(), "unsupported board should fail");
     let combined = format!("{}{}", stdout(&out), stderr(&out));
     assert!(
-        combined.to_lowercase().contains("unsupported") || combined.to_lowercase().contains("error"),
+        combined.to_lowercase().contains("unsupported")
+            || combined.to_lowercase().contains("error"),
         "should mention unsupported/error: {combined}"
     );
     std::fs::remove_dir_all(tmp).ok();
@@ -128,10 +149,20 @@ fn wokwi_init_creates_diagram_and_toml() {
 
     // Accept both success and "token missing" warning — both still write the files.
     let diagram = tmp.join("diagram.json");
-    let toml    = tmp.join("wokwi.toml");
+    let toml = tmp.join("wokwi.toml");
 
-    assert!(diagram.exists(), "diagram.json not created (exit={:?}):\n{}", out.status.code(), stderr(&out));
-    assert!(toml.exists(),    "wokwi.toml not created (exit={:?}):\n{}", out.status.code(), stderr(&out));
+    assert!(
+        diagram.exists(),
+        "diagram.json not created (exit={:?}):\n{}",
+        out.status.code(),
+        stderr(&out)
+    );
+    assert!(
+        toml.exists(),
+        "wokwi.toml not created (exit={:?}):\n{}",
+        out.status.code(),
+        stderr(&out)
+    );
 
     // diagram.json must contain the wokwi-arduino-uno chip
     let diagram_content = std::fs::read_to_string(&diagram).unwrap();
@@ -227,7 +258,15 @@ void loop() {
     .unwrap();
 
     let out = Command::new(nff())
-        .args(["flash", "--sim", sketch.to_str().unwrap(), "--board", "arduino:avr:uno", "--sim-timeout", "3000"])
+        .args([
+            "flash",
+            "--sim",
+            sketch.to_str().unwrap(),
+            "--board",
+            "arduino:avr:uno",
+            "--sim-timeout",
+            "3000",
+        ])
         .output()
         .unwrap();
 

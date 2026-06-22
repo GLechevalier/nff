@@ -1,7 +1,10 @@
+pub mod arduino_lib;
 pub mod auth;
 pub mod boards;
 pub mod config;
 pub mod installer;
+pub mod pi;
+pub mod retry;
 pub mod serial;
 pub mod toolchain;
 pub mod wokwi;

@@ -1,4 +1,4 @@
-use crate::tools::{boards, config, toolchain};
+use crate::tools::{arduino_lib, boards, config, toolchain};
 use anyhow::Result;
 
 struct Check {
@@ -10,13 +10,28 @@ struct Check {
 
 impl Check {
     fn ok(detail: impl Into<String>) -> Self {
-        Check { passed: true, detail: detail.into(), fix: None, optional: false }
+        Check {
+            passed: true,
+            detail: detail.into(),
+            fix: None,
+            optional: false,
+        }
     }
     fn fail(detail: impl Into<String>, fix: impl Into<String>) -> Self {
-        Check { passed: false, detail: detail.into(), fix: Some(fix.into()), optional: false }
+        Check {
+            passed: false,
+            detail: detail.into(),
+            fix: Some(fix.into()),
+            optional: false,
+        }
     }
     fn warn(detail: impl Into<String>, fix: impl Into<String>) -> Self {
-        Check { passed: false, detail: detail.into(), fix: Some(fix.into()), optional: true }
+        Check {
+            passed: false,
+            detail: detail.into(),
+            fix: Some(fix.into()),
+            optional: true,
+        }
     }
 }
 
@@ -25,6 +40,7 @@ pub fn run() -> Result<()> {
         check_arduino_cli(),
         check_esptool(),
         check_config(),
+        check_lib_sync(),
         check_device(),
         check_claude_desktop(),
         check_wokwi_cli(),
@@ -55,12 +71,31 @@ pub fn run() -> Result<()> {
     Ok(())
 }
 
+fn check_lib_sync() -> Check {
+    let fields = arduino_lib::read_sync_meta();
+    if fields.is_empty() {
+        return Check::warn(
+            "nff Arduino library not synced",
+            "Run `nff install-deps` (or `nff init`)",
+        );
+    }
+    let version = fields.get("version").map(String::as_str).unwrap_or("?");
+    let synced_at = fields.get("synced_at").map(String::as_str).unwrap_or("?");
+    let detail = format!("nff lib {version} synced {synced_at}");
+    match arduino_lib::local_sdk_newer_than_synced() {
+        Some(w) => Check::warn(format!("{detail} — {w}"), "Re-sync the nff library"),
+        None => Check::ok(detail),
+    }
+}
+
 fn check_arduino_cli() -> Check {
     match toolchain::arduino_cli_version() {
         Some(v) => Check::ok(format!(
             "{}  ({})",
             v,
-            toolchain::find_arduino_cli().map(|p| p.display().to_string()).unwrap_or_default()
+            toolchain::find_arduino_cli()
+                .map(|p| p.display().to_string())
+                .unwrap_or_default()
         )),
         None => Check::fail(
             "arduino-cli not found",
@@ -86,7 +121,10 @@ fn check_config() -> Check {
         return Check::fail("Config not found", "Run: nff init");
     }
     match config::load() {
-        Ok(_) => Check::ok(format!("Config found at {}", config::config_path().display())),
+        Ok(_) => Check::ok(format!(
+            "Config found at {}",
+            config::config_path().display()
+        )),
         Err(e) => Check::fail(
             format!("Config unreadable: {e}"),
             format!("Fix or delete {}", config::config_path().display()),
@@ -104,7 +142,10 @@ fn check_device() -> Check {
     }
     let d = &devices[0];
     let sim = d.wokwi_chip.as_deref().unwrap_or("no Wokwi support");
-    Check::ok(format!("Device detected: {} on {}  [sim: {}]", d.board, d.port, sim))
+    Check::ok(format!(
+        "Device detected: {} on {}  [sim: {}]",
+        d.board, d.port, sim
+    ))
 }
 
 fn check_claude_desktop() -> Check {
@@ -122,12 +163,23 @@ fn check_claude_desktop() -> Check {
     };
     let data: serde_json::Value = match serde_json::from_str(&raw) {
         Ok(v) => v,
-        Err(e) => return Check::fail(format!("Claude Desktop config invalid JSON: {e}"), "Fix the file manually"),
+        Err(e) => {
+            return Check::fail(
+                format!("Claude Desktop config invalid JSON: {e}"),
+                "Fix the file manually",
+            )
+        }
     };
     if data["mcpServers"]["nff"].is_null() {
-        return Check::fail("nff not registered in Claude Desktop config", "Run: nff init");
+        return Check::fail(
+            "nff not registered in Claude Desktop config",
+            "Run: nff init",
+        );
     }
-    Check::ok(format!("Claude Desktop config OK  ({})", cfg_path.display()))
+    Check::ok(format!(
+        "Claude Desktop config OK  ({})",
+        cfg_path.display()
+    ))
 }
 
 fn check_wokwi_cli() -> Check {
@@ -136,7 +188,12 @@ fn check_wokwi_cli() -> Check {
             let loc = toolchain::find_wokwi_cli()
                 .map(|p| p.display().to_string())
                 .unwrap_or_default();
-            Check { passed: true, detail: format!("{v}  ({loc})"), fix: None, optional: true }
+            Check {
+                passed: true,
+                detail: format!("{v}  ({loc})"),
+                fix: None,
+                optional: true,
+            }
         }
         None => Check::warn(
             "wokwi-cli not found  (optional — required for --sim and nff wokwi)",
