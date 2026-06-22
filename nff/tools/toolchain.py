@@ -208,6 +208,24 @@ def _run(cmd: list[str], timeout: int = 120) -> RunResult:
         raise ToolchainError(f"Command timed out: {cmd[0]}")
 
 
+def run_arduino_cli(args: list[str], timeout: int = 300) -> RunResult:
+    """Run an arbitrary arduino-cli subcommand (e.g. ["core", "install", ...]).
+
+    Raises ToolchainError if arduino-cli is missing or the command times out.
+    """
+    cli = _require_arduino_cli()
+    return _run([cli, *args], timeout=timeout)
+
+
+def stream_arduino_cli(args: list[str]) -> ProcessStream:
+    """Stream an arbitrary arduino-cli subcommand line-by-line (for long installs).
+
+    Raises ToolchainError if arduino-cli is missing.
+    """
+    cli = _require_arduino_cli()
+    return ProcessStream([cli, *args])
+
+
 def write_sketch(code: str, sketch_dir: Optional[Path] = None) -> Path:
     if sketch_dir is None:
         sketch_dir = _SKETCH_DIR

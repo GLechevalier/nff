@@ -117,6 +117,17 @@ def _onboard_platform(device) -> None:
         return
 
     fqbn = device.fqbn
+    click.echo("\nSetting up the ESP32 toolchain (core, PubSubClient, nff library)…")
+    ok, msg = installer.ensure_onboarding_toolchain(emit=lambda l: click.echo(f"  {l}"))
+    if not ok:
+        click.echo(f"  Toolchain setup failed: {msg}")
+        click.echo("  Fix the above and re-run `nff init`, or install manually:")
+        click.echo(
+            "    arduino-cli core install esp32:esp32 --additional-urls "
+            "https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json"
+        )
+        return
+
     click.echo("\nCompiling onboarding firmware…")
     compile_stream = toolchain.stream_compile(sketch_dir, fqbn)
     for line in compile_stream:
