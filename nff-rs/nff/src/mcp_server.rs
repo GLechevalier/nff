@@ -549,11 +549,8 @@ impl NffServer {
         description = "Compile a sketch ONLY — no board or port needed. Use this to verify a sketch builds. Pass sketch= (path to a .ino file or folder, preferred) or code=. board= defaults to the configured FQBN. Returns JSON: {ok, fqbn, elf, image, artifacts, errors, output}."
     )]
     fn compile(&self, Parameters(p): Parameters<CompileParams>) -> String {
-        use crate::tools::{config, toolchain};
-        let fqbn = p
-            .board
-            .or_else(|| config::get_default_device().ok().and_then(|d| d.fqbn))
-            .unwrap_or_default();
+        use crate::tools::toolchain;
+        let fqbn = p.board.unwrap_or_else(toolchain::configured_board);
         let source = p.sketch.as_ref().map(std::path::PathBuf::from);
         match toolchain::compile_only(&fqbn, p.code.as_deref(), source.as_deref()) {
             Ok(r) => r.to_json().to_string(),
@@ -567,13 +564,13 @@ impl NffServer {
     fn flash(&self, Parameters(p): Parameters<FlashParams>) -> String {
         use crate::tools::{config, toolchain};
         let device = config::get_default_device().unwrap_or_default();
-        let fqbn = p.board.or_else(|| device.fqbn.clone()).unwrap_or_default();
+        let fqbn = p.board.unwrap_or_else(toolchain::configured_board);
         let port = p
             .port
             .or_else(|| device.port.clone().filter(|s| !s.is_empty()))
             .unwrap_or_default();
         if fqbn.is_empty() {
-            return "ERROR: Missing board FQBN (pass board= or run `nff init`)".into();
+            return "ERROR: Missing board (pass board= or run `nff init`)".into();
         }
         if port.is_empty() {
             return "ERROR: Missing port (pass port= or run `nff init`)".into();

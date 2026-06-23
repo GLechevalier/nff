@@ -164,6 +164,18 @@ pub fn flatten_sdk(repo_root: &Path, dest: &Path) -> Result<(), ArduinoLibError>
 
 /// Download nff-sdk-c, flatten it, and install it into arduino-cli's libraries dir.
 pub fn install_nff_library() -> Result<PathBuf, ArduinoLibError> {
+    install_nff_library_to(&resolve_lib_dir())
+}
+
+/// Flatten the nff SDK into an explicit `dest` (e.g. a PlatformIO project's
+/// `lib/nff`). Prefers a local nff-sdk-c checkout when one is present — so offline
+/// dev and SDK edits work without a network round-trip — and downloads otherwise.
+pub fn install_nff_library_to(dest: &Path) -> Result<PathBuf, ArduinoLibError> {
+    if let Some(local) = detect_local_sdk_src() {
+        flatten_sdk(&local, dest)?;
+        return Ok(dest.to_path_buf());
+    }
+
     let url = tarball_url();
     let resp = reqwest::blocking::get(&url)
         .and_then(|r| r.error_for_status())
@@ -172,7 +184,6 @@ pub fn install_nff_library() -> Result<PathBuf, ArduinoLibError> {
         .bytes()
         .map_err(|e| ArduinoLibError(format!("could not read nff SDK: {e}")))?;
 
-    let dest = resolve_lib_dir();
     let tmp = std::env::temp_dir().join(format!("nff_sdk_{}", std::process::id()));
     std::fs::create_dir_all(&tmp)?;
 
@@ -189,9 +200,9 @@ pub fn install_nff_library() -> Result<PathBuf, ArduinoLibError> {
         .find(|p| p.is_dir())
         .ok_or_else(|| ArduinoLibError("unexpected SDK archive layout".into()))?;
 
-    flatten_sdk(&top, &dest)?;
+    flatten_sdk(&top, dest)?;
     std::fs::remove_dir_all(&tmp).ok();
-    Ok(dest)
+    Ok(dest.to_path_buf())
 }
 
 /// Parse the installed library's `.nff_sync_meta` into a map (empty if absent).

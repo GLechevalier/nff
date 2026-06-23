@@ -14,6 +14,12 @@ const SIM_BOARDS: &[(&str, &str)] = &[
 ];
 
 pub fn run(args: &InitArgs) -> Result<()> {
+    // Persist an explicit backend choice up front so the rest of init — and every
+    // later build — honours it (default stays platformio).
+    if let Some(b) = &args.backend {
+        config::set_build_backend(b)?;
+    }
+
     if args.port.is_none() {
         let mode = pick_mode()?;
         if mode == 2 {
@@ -21,14 +27,23 @@ pub fn run(args: &InitArgs) -> Result<()> {
         }
     }
 
-    ensure_arduino_cli();
-
-    // Install the onboarding toolchain (esp32 core + PubSubClient + nff lib) so
-    // a bootstrap sketch with `#include <nff.h>` compiles. Best-effort: a network
-    // hiccup shouldn't block configuring the board.
-    println!("  Ensuring build toolchain (esp32 core + nff library)…");
-    if let Err(e) = installer::ensure_onboarding_toolchain() {
-        println!("  ⚠  onboarding toolchain incomplete: {e}");
+    if toolchain::pio_active() {
+        // PlatformIO is board-universal; platforms/frameworks self-install on the
+        // first build, so just ensure Core is present.
+        println!("  Ensuring PlatformIO (board-universal build backend)…");
+        let (ok, msg) = crate::tools::pio::ensure_toolchain(&|m| println!("  {m}"));
+        if !ok {
+            println!("  ⚠  {msg} — install manually: pip install platformio");
+        }
+    } else {
+        ensure_arduino_cli();
+        // Install the onboarding toolchain (esp32 core + PubSubClient + nff lib) so
+        // a bootstrap sketch with `#include <nff.h>` compiles. Best-effort: a network
+        // hiccup shouldn't block configuring the board.
+        println!("  Ensuring build toolchain (esp32 core + nff library)…");
+        if let Err(e) = installer::ensure_onboarding_toolchain() {
+            println!("  ⚠  onboarding toolchain incomplete: {e}");
+        }
     }
 
     // Guard against overwriting existing config
@@ -220,6 +235,14 @@ fn run_sim_init(baud: u32, force: bool) -> Result<()> {
 
 fn write_success(_port: &str, _board: &str, device: Option<&boards::DetectedDevice>) {
     if let Some(d) = device {
+        // Under the PlatformIO backend, seed build.board from the detected device so
+        // `nff compile`/`flash` work without an explicit --board.
+        if toolchain::pio_active() {
+            if let Some(pio_board) = boards::fqbn_to_pio_board(&d.fqbn) {
+                let _ = config::set_build_board(Some(pio_board));
+                println!("  ✓ PlatformIO board: {pio_board}");
+            }
+        }
         let sim = d.wokwi_chip.as_deref().unwrap_or("no Wokwi support");
         println!(
             "  ✓ Found: {} on {} (vendor: {}, product: {})  [sim: {}]",

@@ -4,6 +4,7 @@ pub mod boards;
 pub mod config;
 pub mod installer;
 pub mod pi;
+pub mod pio;
 pub mod retry;
 pub mod serial;
 pub mod toolchain;

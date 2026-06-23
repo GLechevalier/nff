@@ -12,8 +12,8 @@ use crate::tools::retry;
 // Command timeouts (seconds). The generic RUN_TIMEOUT covers short commands; a
 // cold ESP32 first build easily exceeds 120s, so compile gets its own ceiling.
 const RUN_TIMEOUT: u64 = 120;
-const COMPILE_TIMEOUT: u64 = 600;
-const UPLOAD_TIMEOUT: u64 = 180;
+pub(crate) const COMPILE_TIMEOUT: u64 = 600;
+pub(crate) const UPLOAD_TIMEOUT: u64 = 180;
 
 // Compile uses the default backoff; upload uses a longer one because the board
 // re-enumerates after arduino-cli's auto-reset.
@@ -62,6 +62,27 @@ impl retry::RetryOutcome for RunResult {
     }
     fn text(&self) -> String {
         self.output()
+    }
+}
+
+/// True when the PlatformIO backend is selected (env/config; default platformio).
+pub fn pio_active() -> bool {
+    crate::tools::config::active_backend() == "platformio"
+}
+
+/// The board identifier for the active backend: the PlatformIO board id
+/// (`build.board`) when pio is active, else the arduino-cli FQBN (`default_device.fqbn`).
+/// Falls back to the other field / "" so a `--board` override is never required.
+pub fn configured_board() -> String {
+    let device = crate::tools::config::get_default_device().unwrap_or_default();
+    if pio_active() {
+        crate::tools::config::get_build_config()
+            .ok()
+            .and_then(|b| b.board)
+            .or(device.fqbn)
+            .unwrap_or_default()
+    } else {
+        device.fqbn.unwrap_or_default()
     }
 }
 
@@ -330,7 +351,7 @@ fn run_timed(cmd: &[&str], timeout_secs: u64) -> Result<RunResult, ToolchainErro
 /// `run_timed` mapping any hard spawn error into a failed RunResult, so a retry
 /// driver can branch purely on the result (a missing binary classifies as
 /// non-transient and fails fast).
-fn run_timed_result(cmd: &[&str], timeout_secs: u64) -> RunResult {
+pub(crate) fn run_timed_result(cmd: &[&str], timeout_secs: u64) -> RunResult {
     match run_timed(cmd, timeout_secs) {
         Ok(r) => r,
         Err(e) => RunResult {
@@ -505,6 +526,7 @@ pub fn stream_with_retry(
     mut make_stream: impl FnMut() -> Result<ProcessStream, ToolchainError>,
     emit: &mut dyn FnMut(&str),
     backoff: &[f64],
+    recover: Option<&dyn Fn(&str)>,
 ) -> i32 {
     let retries = backoff.len();
     for i in 0..=retries {
@@ -525,12 +547,30 @@ pub fn stream_with_retry(
             i + 2,
             retries + 1
         ));
+        if let Some(rec) = recover {
+            rec(&out);
+        }
         retry::real_sleep(delay);
     }
     -1
 }
 
+/// A between-retries package-repair hook for the active backend, or None. On the
+/// PlatformIO backend this prunes a half-installed platform so a retried build
+/// reinstalls clean; the arduino backend has nothing to repair this way. The returned
+/// closure borrows `board`, so keep `board` alive across the `stream_with_retry` call.
+pub fn package_recover(board: &str) -> impl Fn(&str) + '_ {
+    move |out: &str| {
+        if pio_active() {
+            crate::tools::pio::recover_packages(out, board);
+        }
+    }
+}
+
 pub fn stream_compile(sketch_dir: &Path, fqbn: &str) -> Result<ProcessStream, ToolchainError> {
+    if pio_active() {
+        return crate::tools::pio::stream_compile(sketch_dir, fqbn);
+    }
     let exe = require_arduino_cli()?;
     let output_dir = elf_path_for(sketch_dir, fqbn)
         .parent()
@@ -555,6 +595,9 @@ pub fn stream_upload(
     fqbn: &str,
     port: &str,
 ) -> Result<ProcessStream, ToolchainError> {
+    if pio_active() {
+        return crate::tools::pio::stream_upload(sketch_dir, fqbn, port);
+    }
     let exe = require_arduino_cli()?;
     let input_dir = elf_path_for(sketch_dir, fqbn)
         .parent()
@@ -588,6 +631,9 @@ pub fn flash(code: &str, fqbn: &str, port: &str) -> String {
 /// Compile then upload an already-resolved sketch directory. Used by the `flash`
 /// MCP tool so it can accept a sketch path, not just raw code.
 pub fn flash_sketch(target_dir: &Path, fqbn: &str, port: &str) -> String {
+    if pio_active() {
+        return crate::tools::pio::flash_project(target_dir, fqbn, port);
+    }
     let compile_result = match compile_sketch(target_dir, fqbn) {
         Ok(r) => r,
         Err(e) => return format!("ERROR: {e}"),
@@ -702,7 +748,7 @@ impl CompileResult {
 }
 
 /// First file under `root` whose name ends with `ext` (recursive; rglob fallback).
-fn find_by_ext(root: &Path, ext: &str) -> Option<PathBuf> {
+pub(crate) fn find_by_ext(root: &Path, ext: &str) -> Option<PathBuf> {
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
         let Ok(entries) = std::fs::read_dir(&dir) else {
@@ -729,6 +775,9 @@ fn find_by_ext(root: &Path, ext: &str) -> Option<PathBuf> {
 /// the deterministic build dir first, then falls back to a recursive scan so a
 /// stray build layout still resolves instead of returning nothing.
 pub fn discover_artifacts(sketch_dir: &Path, fqbn: &str) -> BTreeMap<String, PathBuf> {
+    if pio_active() {
+        return crate::tools::pio::discover_artifacts(sketch_dir, fqbn);
+    }
     let bdir = build_dir(sketch_dir, fqbn);
     let name = sketch_dir
         .file_name()
@@ -766,6 +815,18 @@ pub fn discover_artifacts(sketch_dir: &Path, fqbn: &str) -> BTreeMap<String, Pat
 /// Normalize raw code, a `.ino` file, or a sketch folder into a sketch directory
 /// arduino-cli will accept (folder name must match the `.ino` stem).
 pub fn resolve_sketch_dir(
+    code: Option<&str>,
+    source: Option<&Path>,
+) -> Result<PathBuf, ToolchainError> {
+    if pio_active() {
+        return crate::tools::pio::resolve_project(code, source, None);
+    }
+    resolve_sketch_dir_arduino(code, source)
+}
+
+/// The arduino-cli sketch-dir resolution (folder name must match the `.ino` stem).
+/// Split out from the backend dispatcher so it can be unit-tested directly.
+fn resolve_sketch_dir_arduino(
     code: Option<&str>,
     source: Option<&Path>,
 ) -> Result<PathBuf, ToolchainError> {
@@ -844,8 +905,31 @@ pub fn compile_only(
 ) -> Result<CompileResult, ToolchainError> {
     if fqbn.is_empty() {
         return Err(ToolchainError::Invalid(
-            "Missing board FQBN — pass board=/--board or run `nff init`".into(),
+            "Missing board (FQBN or PlatformIO board id) — pass board=/--board or run `nff init`"
+                .into(),
         ));
+    }
+    if pio_active() {
+        if crate::tools::pio::find_platformio().is_none() {
+            return Err(ToolchainError::NotFound(
+                "platformio not found — run `nff install-deps`".into(),
+            ));
+        }
+        let sd = crate::tools::pio::resolve_project(code, source, None)?;
+        let result = crate::tools::pio::compile_sketch(&sd, fqbn)?;
+        let artifacts = if result.success {
+            crate::tools::pio::discover_artifacts(&sd, fqbn)
+        } else {
+            BTreeMap::new()
+        };
+        return Ok(CompileResult {
+            ok: result.success,
+            fqbn: fqbn.to_string(),
+            sketch_dir: sd,
+            returncode: result.returncode,
+            output: result.output(),
+            artifacts,
+        });
     }
     if find_arduino_cli().is_none() {
         return Err(ToolchainError::NotFound(
@@ -936,16 +1020,18 @@ mod tests {
 
     #[test]
     fn resolve_sketch_dir_passes_through_folder() {
+        // Arduino-backend resolution is tested directly (the public dispatcher routes
+        // to the PlatformIO backend by default).
         let dir = std::env::temp_dir().join(format!("nff_rsd_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let resolved = resolve_sketch_dir(None, Some(&dir)).unwrap();
+        let resolved = resolve_sketch_dir_arduino(None, Some(&dir)).unwrap();
         assert_eq!(resolved, dir);
         std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn resolve_sketch_dir_writes_code() {
-        let resolved = resolve_sketch_dir(Some("void setup(){} void loop(){}"), None).unwrap();
+        let resolved = resolve_sketch_dir_arduino(Some("void setup(){} void loop(){}"), None).unwrap();
         let ino = resolved.join(format!(
             "{}.ino",
             resolved.file_name().unwrap().to_string_lossy()
