@@ -93,7 +93,10 @@ jobs:
             target: x86_64-pc-windows-msvc
           - os: macos-latest
             target: aarch64-apple-darwin
-          - os: macos-13
+          # Intel macOS wheel — cross-compiled on the Apple-Silicon runner. The
+          # legacy `macos-13` Intel runner is on GitHub's retirement path and can
+          # sit unschedulable; the arm64 runner's toolchain targets x86_64 fine.
+          - os: macos-latest
             target: x86_64-apple-darwin
     runs-on: ${{ matrix.os }}
     steps:
