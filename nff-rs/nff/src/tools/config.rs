@@ -181,6 +181,14 @@ impl Default for Config {
 }
 
 pub fn config_path() -> PathBuf {
+    // NFF_CONFIG_DIR overrides the config location — used by tests for deterministic
+    // isolation (HOME isn't honored by dirs::home_dir() on Windows), and handy for
+    // running multiple isolated nff setups.
+    if let Ok(dir) = std::env::var("NFF_CONFIG_DIR") {
+        if !dir.is_empty() {
+            return PathBuf::from(dir).join("config.json");
+        }
+    }
     home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".nff")

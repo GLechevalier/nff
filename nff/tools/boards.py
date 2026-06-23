@@ -65,6 +65,15 @@ def wokwi_chip_for(board: str) -> Optional[str]:
     return None
 
 
+def fqbn_to_pio_board(fqbn: str) -> Optional[str]:
+    """Map an arduino-cli FQBN to a default PlatformIO board id (via BOARD_MAP), so the
+    pio backend works without --board even when build.board was never persisted."""
+    for entry in BOARD_MAP.values():
+        if entry.get("fqbn") == fqbn:
+            return entry.get("pio_board")
+    return None
+
+
 @dataclass
 class DetectedDevice:
     port: str

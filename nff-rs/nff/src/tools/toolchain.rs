@@ -76,11 +76,26 @@ pub fn pio_active() -> bool {
 pub fn configured_board() -> String {
     let device = crate::tools::config::get_default_device().unwrap_or_default();
     if pio_active() {
-        crate::tools::config::get_build_config()
+        // 1. an explicit build.board (set by `nff init`);
+        if let Some(board) = crate::tools::config::get_build_config()
             .ok()
             .and_then(|b| b.board)
-            .or(device.fqbn)
-            .unwrap_or_default()
+            .filter(|b| !b.is_empty())
+        {
+            return board;
+        }
+        // 2. derive a PlatformIO board id from the detected arduino FQBN, so the pio
+        //    backend works without --board even when build.board was never persisted
+        //    (e.g. a config written before that field existed);
+        if let Some(fqbn) = device.fqbn.as_deref().filter(|f| !f.is_empty()) {
+            if let Some(pio_board) = crate::tools::boards::fqbn_to_pio_board(fqbn) {
+                return pio_board.to_string();
+            }
+            // 3. last resort: hand the fqbn through (a real pio board id stored as the
+            //    device fqbn still works; an arduino FQBN will error clearly).
+            return fqbn.to_string();
+        }
+        String::new()
     } else {
         device.fqbn.unwrap_or_default()
     }

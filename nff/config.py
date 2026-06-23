@@ -5,7 +5,9 @@ import json
 import os
 from pathlib import Path
 
-CONFIG_DIR = Path.home() / ".nff"
+# NFF_CONFIG_DIR overrides the config location (test isolation; multiple isolated setups).
+_CONFIG_OVERRIDE = os.environ.get("NFF_CONFIG_DIR")
+CONFIG_DIR = Path(_CONFIG_OVERRIDE) if _CONFIG_OVERRIDE else Path.home() / ".nff"
 CONFIG_PATH = CONFIG_DIR / "config.json"
 
 _DEFAULT = {

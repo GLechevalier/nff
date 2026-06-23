@@ -66,11 +66,21 @@ def configured_board() -> str:
     ``default_device.fqbn`` (an arduino-cli FQBN).
     """
     try:
+        fqbn = config.get_default_device().get("fqbn") or ""
         if _pio_active():
+            # 1. an explicit build.board (set by `nff init`);
             board = (config.get_build_config() or {}).get("board")
             if board:
                 return board
-        return config.get_default_device().get("fqbn") or ""
+            # 2. derive a PlatformIO board id from the detected arduino FQBN, so the pio
+            #    backend works without --board even when build.board was never persisted;
+            if fqbn:
+                from nff.tools import boards
+                pio_board = boards.fqbn_to_pio_board(fqbn)
+                if pio_board:
+                    return pio_board
+            # 3. last resort: hand the fqbn through.
+        return fqbn
     except Exception:
         return ""
 
