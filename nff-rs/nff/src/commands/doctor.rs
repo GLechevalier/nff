@@ -1,4 +1,4 @@
-use crate::tools::{arduino_lib, boards, config, toolchain};
+use crate::tools::{arduino_lib, boards, config, daemon, toolchain};
 use anyhow::Result;
 
 struct Check {
@@ -44,6 +44,8 @@ pub fn run() -> Result<()> {
         check_config(),
         check_lib_sync(),
         check_device(),
+        check_login(),
+        check_mcp_server(),
         check_claude_desktop(),
         check_wokwi_cli(),
     ];
@@ -173,6 +175,34 @@ fn check_device() -> Check {
         "Device detected: {} on {}  [sim: {}]",
         d.board, d.port, sim
     ))
+}
+
+fn check_login() -> Check {
+    // Signed in to the nff platform? The MCP tools are gated behind this token.
+    let signed_in = config::load()
+        .map(|c| c.diagnosis.access_token.is_some())
+        .unwrap_or(false);
+    if signed_in {
+        Check::ok("Signed in to the nff platform")
+    } else {
+        Check::fail("Not signed in", "Run `nff auth login` (or `nff init`) to sign in")
+    }
+}
+
+fn check_mcp_server() -> Check {
+    // `nff init` starts the background MCP server, but a reboot stops it.
+    if daemon::is_running(daemon::DEFAULT_HOST, daemon::DEFAULT_PORT) {
+        Check::ok(format!(
+            "MCP server running on http://{}:{}/mcp",
+            daemon::DEFAULT_HOST,
+            daemon::DEFAULT_PORT
+        ))
+    } else {
+        Check::fail(
+            "MCP server not running",
+            "Run `nff mcp` (or re-run `nff init`) to start it",
+        )
+    }
 }
 
 fn check_claude_desktop() -> Check {

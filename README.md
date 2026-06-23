@@ -14,7 +14,7 @@ you: "Why did the unit in the field just hard-fault?"
 LLM: [captures panic over OTA] → [reads registers + backtrace] → "Stack overflow in your sensor ISR at line 47"
 ```
 
-**Supported boards:** with the **PlatformIO backend** (now the default in both the shipped Rust binary and the Python implementation) nff is board-universal — any of PlatformIO's ~1000 boards (every ESP32 variant, RP2040/Pico, STM32, classic AVR, …), with the platform toolchain auto-installed on first build. The classic **arduino-cli backend** remains available and covers ESP32 (CP210x / CH340) · ESP8266 (FTDI) · Arduino AVR (Uno, Mega, Nano, Leonardo). See [Build backends](#build-backends).
+**Supported boards:** with the **PlatformIO backend** (now the default in both the shipped Rust binary and the Python implementation) nff is board-universal — **any of PlatformIO's ~1000+ boards across ~40 hardware platforms** (every ESP32 variant, RP2040/Pico, all STM32 families, classic & megaAVR, SAMD/SAM, Teensy, nRF51/nRF52, Renesas RA / Arduino Uno R4, NXP LPC, Kendryte K210, GD32V/RISC-V, MSP430, TIVA, and many more), with the platform toolchain auto-installed on first build. The classic **arduino-cli backend** remains available and covers ESP32 (CP210x / CH340) · ESP8266 (FTDI) · Arduino AVR (Uno, Mega, Nano, Leonardo). See [Build backends](#build-backends) and the full [Supported Boards](#supported-boards) listing.
 
 **Shipped as a single Rust binary.** The release artifact is the compiled `nff` binary built from `nff-rs/` — a self-contained executable with no Python runtime required. The Python package under `nff/nff/` remains as the reference/prototyping implementation (features are often prototyped there first, then ported to Rust at parity); both are kept in sync, version for version. The Rust port is at full feature parity (CLI commands, MCP server + OAuth proxy, the bench-loop hardening, the PlatformIO build backend, and the `nff pi` Raspberry-Pi probe).
 
@@ -55,7 +55,7 @@ nff init --backend arduino        # opt back into arduino-cli
 
 `--board` is backend-aware: a **PlatformIO board id** under the pio backend, an **arduino-cli FQBN** under the arduino backend. With a board saved via `nff init` you can omit `--board` entirely.
 
-> **Status:** the PlatformIO backend currently lives in the **Python implementation** (`nff/nff/`), where it is the default. The shipped Rust binary (`nff-rs/`) still builds via arduino-cli — the PlatformIO port is in progress. Cloud onboarding (`nff init` → claim a device to the fleet) also still runs on the arduino backend; `nff init --backend platformio` configures local builds and skips that step.
+> **Status:** both backends ship in the compiled Rust binary (`nff-rs/`) — the artifact `pip install nff` delivers — with **PlatformIO the default**. The Python package (`nff/`) is the reference/prototyping implementation and is kept at parity. `nff init --backend platformio` (or `arduino`) persists the choice.
 
 📄 Full write-up — architecture, internals, requirements, and verification — in [`docs/platformio-backend.md`](docs/platformio-backend.md).
 
@@ -136,7 +136,7 @@ Get your hardware on the LLM loop in under five minutes.
 pip install nff
 ```
 
-Pure-Python install (requires Python ≥ 3.10) — no compiler or Rust toolchain needed. `esptool` ships as a dependency, so no separate install is needed.
+`pip install nff` fetches a **prebuilt wheel containing the compiled Rust binary** for your platform (Linux x64, Windows x64, macOS arm64/x64) — no Python runtime and no Rust toolchain needed at runtime. pip is just the delivery mechanism; the installed `nff` command is the native binary.
 
 ### 2. Install board cores
 
@@ -251,13 +251,47 @@ Useful flags:
 
 ## Supported Boards
 
-**On the default PlatformIO backend, nff is board-universal.** Pass any of PlatformIO's [~1000 board ids](https://docs.platformio.org/en/latest/boards/index.html) to `--board` and the matching platform toolchain (compiler + framework + uploader) installs itself on first build — there is no fixed allow-list and nothing to pre-install.
+**On the default PlatformIO backend, nff is board-universal.** Pass any of PlatformIO's [~1000+ board ids](https://docs.platformio.org/en/latest/boards/index.html) to `--board` and the matching platform toolchain (compiler + framework + uploader) installs itself on first build — there is no fixed allow-list and nothing to pre-install.
 
-### Curated families
+### Architectures & platforms covered
 
-These are the board ids in nff's built-in catalog. The catalog only supplies sensible defaults (PlatformIO platform + Wokwi sim chip) so you can name a short board id and `nff init` can auto-detect — **boards outside it still build**, you just pass the full PlatformIO id.
+The PlatformIO backend gives nff every PlatformIO **development platform** — each one a whole family of boards. You don't need any of these in nff's catalog; just pass the PlatformIO board id to `--board` and the toolchain installs on first build. The table below is the full set of platforms (≈40), each spanning dozens-to-hundreds of individual boards.
 
-| Family | PlatformIO platform | Example `--board` ids | Wokwi sim |
+| Platform (`--board` resolves it) | Core / MCU family | Example boards & `--board` ids |
+|---|---|---|
+| `espressif32` | Espressif ESP32 (Xtensa LX6/LX7 + RISC-V) | ESP32, ESP32-S2, ESP32-S3, ESP32-C3/C6/H2, ESP32-P4 — `esp32dev`, `esp32-s3-devkitc-1`, `esp32-c6-devkitc-1` |
+| `espressif8266` | Espressif ESP8266 (Tensilica L106) | NodeMCU, Wemos D1 — `esp01_1m`, `nodemcuv2`, `d1_mini` |
+| `raspberrypi` | Raspberry Pi RP2040 / RP2350 (ARM Cortex-M0+/M33) | Pico, Pico W, Pico 2 — `pico`, `rpipicow`, `rpipico2` |
+| `atmelavr` | Classic 8-bit Atmel AVR | Arduino Uno/Mega/Nano/Leonardo, Pro Mini — `uno`, `megaatmega2560`, `nanoatmega328`, `leonardo` |
+| `atmelmegaavr` | Atmel megaAVR (0-series) | Arduino Uno WiFi Rev2, Nano Every — `uno_wifi_rev2`, `nano_every` |
+| `atmelsam` | Atmel SAM (ARM Cortex-M0+/M3/M4) | Arduino Zero/MKR/Due, Adafruit Feather M0/M4 — `mkrwifi1010`, `adafruit_feather_m4`, `due` |
+| `ststm32` | ST STM32 (ARM Cortex-M0/0+/M3/M4/M7) — F0/F1/F2/F3/F4/F7/G0/G4/H7/L0/L1/L4/L5/U5/WB/WL | Blue Pill, Black Pill, every Nucleo/Discovery — `bluepill_f103c8`, `genericSTM32F103C8`, `nucleo_f401re`, `nucleo_h743zi` |
+| `ststm8` | ST STM8 (8-bit) | STM8S Discovery, sduino — `stm8sdiscovery` |
+| `teensy` | PJRC Teensy (ARM Cortex-M4/M7) | Teensy 3.x / 4.0 / 4.1 / LC — `teensy41`, `teensy40`, `teensy36`, `teensylc` |
+| `nordicnrf52` | Nordic nRF52 (ARM Cortex-M4, BLE) | Adafruit Feather/ItsyBitsy nRF52840, Nano 33 BLE — `nano33ble`, `adafruit_feather_nrf52840` |
+| `nordicnrf51` | Nordic nRF51 (ARM Cortex-M0, BLE) | micro:bit v1, BBC boards — `bbcmicrobit`, `nrf51_dk` |
+| `renesas-ra` | Renesas RA4M1 (ARM Cortex-M4) | **Arduino Uno R4** Minima / WiFi — `uno_r4_minima`, `uno_r4_wifi` |
+| `nxplpc` | NXP LPC (ARM Cortex-M0/M3/M4) | mbed LPC1768, LPC11U24 — `lpc1768`, `lpc11u35` |
+| `nxpimxrt` | NXP i.MX RT (ARM Cortex-M7) | MIMXRT1060/1010 EVK — `mimxrt1060_evk` |
+| `freescalekinetis` | NXP/Freescale Kinetis (ARM Cortex-M0+/M4) | FRDM-K64F, FRDM-KL25Z — `frdm_k64f`, `frdm_kl25z` |
+| `siliconlabsefm32` | Silicon Labs EFM32 (ARM Cortex-M) | EFM32 Giant/Wonder Gecko — `efm32gg_stk3700` |
+| `gd32v` | GigaDevice GD32V (RISC-V) | Sipeed Longan Nano — `sipeed-longan-nano` |
+| `kendryte210` | Kendryte K210 (RISC-V, AI) | Sipeed MAIX — `sipeed-maix-bit` |
+| `microchippic32` | Microchip PIC32 (MIPS) | chipKIT Uno32, Max32 — `chipkit_uno32`, `chipkit_max32` |
+| `timsp430` | TI MSP430 (16-bit) | MSP430 LaunchPads — `lpmsp430g2553`, `lpmsp430fr6989` |
+| `titiva` | TI TIVA C (ARM Cortex-M4) | Tiva C / Stellaris LaunchPad — `lptm4c1230c3pm`, `lplm4f120h5qr` |
+| `infineonxmc` | Infineon XMC (ARM Cortex-M) | XMC2Go, XMC1100 Boot Kit — `xmc1100_xmc2go` |
+| `intel_arc32` | Intel Curie (ARC) | Arduino/Genuino 101 — `genuino101` |
+| `wiznet7500` | WIZnet W7500 (ARM Cortex-M0, Ethernet) | WIZwiki-W7500 — `wizwiki_w7500` |
+| `lattice_ice40` | Lattice iCE40 FPGA | TinyFPGA B2, iCEstick — `icezum`, `tinyfpga_b2` |
+
+> Less common platforms PlatformIO also ships (and that nff therefore drives) include `nuclei`, `riscv_gap`, `samd21`, `chipsalliance`, `aceinna_imu`, `shakti`, `samsung_artik`, and others — see the [PlatformIO platforms index](https://docs.platformio.org/en/latest/platforms/index.html) for the live, complete list.
+
+### Curated families (built-in catalog)
+
+These are the board ids in nff's built-in catalog. The catalog only supplies sensible defaults (PlatformIO platform + Wokwi sim chip) so you can name a short board id and `nff init` can auto-detect — **every other board above still builds**, you just pass the full PlatformIO id.
+
+| Family | PlatformIO platform | Catalogued `--board` ids | Wokwi sim |
 |---|---|---|---|
 | **ESP32** | `espressif32` | `esp32dev`, `esp32-s3-devkitc-1`, `esp32-c3-devkitm-1`, `esp32-c6-devkitc-1`, `esp32-s2-saola-1` | ✅ (S2: ❌) |
 | **ESP8266** | `espressif8266` | `esp01_1m`, `nodemcuv2` | ✅ |
@@ -265,7 +299,7 @@ These are the board ids in nff's built-in catalog. The catalog only supplies sen
 | **STM32** | `ststm32` | `genericSTM32F103C8`, `bluepill_f103c8`, `nucleo_f401re` | ❌ |
 | **Classic AVR** | `atmelavr` | `uno`, `megaatmega2560`, `nanoatmega328`, `leonardo` | ✅ |
 
-Need another board (Teensy, SAMD, nRF52, ESP32-P4, …)? Just give its PlatformIO id — e.g. `nff compile sketch.ino --board teensy41`. Add it to the catalog (for auto-detect + a short default) in a PR — it's [two lines of code](CONTRIBUTING.md#adding-a-new-board).
+Need a board that isn't catalogued (Teensy, SAMD, nRF52, Uno R4, ESP32-P4, …)? Just give its PlatformIO id — e.g. `nff compile sketch.ino --board teensy41`. Adding it to the catalog (for auto-detect + a short default) is a [two-line PR](CONTRIBUTING.md#adding-a-new-board).
 
 ### USB auto-detect
 

@@ -2,6 +2,7 @@ pub mod arduino_lib;
 pub mod auth;
 pub mod boards;
 pub mod config;
+pub mod daemon;
 pub mod installer;
 pub mod pi;
 pub mod pio;

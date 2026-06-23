@@ -342,6 +342,12 @@ async fn bearer_auth(
     }
 }
 
+/// Unauthenticated liveness probe — lets `nff init`/`nff doctor` confirm the background
+/// server is up (and that it's *ours*). Does not touch /mcp, which stays bearer-gated.
+async fn health() -> Response {
+    json_response(StatusCode::OK, &json!({ "service": "nff", "ok": true }))
+}
+
 async fn wk_resource(Extension(oauth): Extension<Arc<OAuthState>>) -> Response {
     json_response(
         StatusCode::OK,
@@ -1086,6 +1092,7 @@ pub async fn run(bind: &str) -> anyhow::Result<()> {
         .layer(middleware::from_fn_with_state(oauth.clone(), bearer_auth));
 
     let app = Router::new()
+        .route("/health", get(health))
         .route("/.well-known/oauth-protected-resource", get(wk_resource))
         .route(
             "/.well-known/oauth-authorization-server",

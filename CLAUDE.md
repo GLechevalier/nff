@@ -88,14 +88,16 @@ Always set minAngle: "-90" and maxAngle: "90" on wokwi-servo in diagram.json.
 
 ## Status
 
-> **CURRENT (2026-06): the Python package under `nff/nff/` is the active development surface.**
-> The Rust port (`nff-rs/`) is paused — do **not** treat it as the source of truth and do **not**
-> skip editing the Python files. `nff/nff/mcp_server.py`, `tools/toolchain.py`, and the commands
-> are the live implementation; new features (e.g. the port-free `compile` tool) land here first.
-> The Rust migration notes below are retained for when that work resumes later.
+> **CURRENT (2026-06): the Rust binary (`nff-rs/`) is the shipped product.** `pip install nff`
+> now delivers a per-platform wheel containing the compiled Rust binary (maturin `bindings="bin"`,
+> see `pyproject.toml`) — no Python runtime. The Rust port is at parity: all CLI commands, both
+> build backends (PlatformIO default + arduino), and the full MCP server (HTTP + OAuth proxy +
+> `/health` + background-daemon auto-start). The Python package under `nff/` remains as a
+> reference/prototype kept in sync version-for-version — **land features in BOTH** so they never
+> drift (prototype in Python if you like, but the shipped behavior is Rust).
 
-The Rust port aimed to replace the Python `nff` with a single compiled binary — no Python runtime
-for end users, stronger types, better cross-platform packaging.
+The Rust port replaces the Python `nff` with a single compiled binary — no Python runtime for end
+users, stronger types, better cross-platform packaging.
 
 The MCP server is now native Rust (`nff-rs/nff/src/mcp_server.rs`, rmcp crate). Wokwi
 integration is also native Rust (`tools/wokwi.rs`). Only `nff test` still delegates to the

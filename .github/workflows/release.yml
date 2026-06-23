@@ -77,29 +77,46 @@ jobs:
           git push origin main
           git push origin "v${{ steps.bump.outputs.new_version }}"
 
-  # ── 3. Build the pip-installable wheel ──────────────────────────────────────
-  # The package is a pure-Python hatchling project, so one universal
-  # (py3-none-any) wheel installs everywhere — build it with the standard PyPA
-  # build, NOT maturin (maturin expects a Rust/mixed project and failed here).
-  build-wheel:
+  # ── 3. Build the pip-installable wheels (one Rust binary per platform) ───────
+  # maturin (bindings = "bin", see pyproject.toml [tool.maturin]) packages the
+  # compiled nff binary into a platform wheel. One job per target so `pip install
+  # nff` gets a prebuilt binary on each OS — no Rust toolchain on the user's machine.
+  build-wheels:
     needs: bump-version
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: macos-13
+            target: x86_64-apple-darwin
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: v${{ needs.bump-version.outputs.new_version }}
-      - uses: actions/setup-python@v5
+      - name: Build wheel
+        uses: PyO3/maturin-action@v1
         with:
-          python-version: "3.12"
-      - name: Build sdist + wheel
-        run: |
-          python -m pip install --upgrade build
-          python -m build --outdir dist
-      - name: Upload dist artifact
+          command: build
+          args: --release --out dist
+          target: ${{ matrix.target }}
+          # Linux builds run in a manylinux container; serialport needs libudev
+          # headers there (auditwheel then bundles libudev into the wheel).
+          manylinux: auto
+          before-script-linux: |
+            if command -v yum >/dev/null 2>&1; then yum install -y systemd-devel; fi
+            if command -v apt-get >/dev/null 2>&1; then apt-get update && apt-get install -y libudev-dev; fi
+      - name: Upload wheel artifact
         uses: actions/upload-artifact@v4
         with:
-          name: dist
-          path: dist/*
+          name: wheels-${{ matrix.target }}
+          path: dist/*.whl
 
   # ── 4. Build standalone Rust binaries (the single-binary downloads) ─────────
   build-binaries:
@@ -137,14 +154,15 @@ jobs:
           name: ${{ matrix.asset }}
           path: ${{ matrix.asset }}
 
-  # ── 5. Publish the wheel to PyPI (keeps `pip install nff` working) ───────────
+  # ── 5. Publish the per-platform wheels to PyPI (`pip install nff` → Rust binary) ─
   publish-pypi:
-    needs: [bump-version, build-wheel]
+    needs: [bump-version, build-wheels]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: dist
+          pattern: wheels-*
+          merge-multiple: true
           path: dist/
       - uses: actions/setup-python@v5
         with:
@@ -155,7 +173,7 @@ jobs:
           TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
         run: |
           python -m pip install --upgrade twine
-          python -m twine upload --skip-existing dist/*
+          python -m twine upload --skip-existing dist/*.whl
 
   # ── 6. Create GitHub Release with standalone binaries ──────────────────────
   publish-release:
