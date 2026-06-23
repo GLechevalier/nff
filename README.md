@@ -19,6 +19,10 @@ Connect your board over USB and Claude writes, compiles, flashes, and reads seri
 
 > **nff is the open-source bench CLI of the [nff platform](https://nanoforgeflow.com)** — an end-to-end, agent-driven system for developing, shipping, and operating ESP32-class firmware (bench → OTA → fleet diagnosis). This repo (`nff`) and the device library (`nff-sdk-c`) are the two **MIT-licensed** pieces that run on the engineer's laptop and hardware; the hosted backend (fleet broker, OTA orchestration, crash-analysis engine) is proprietary.
 
+<p align="center">
+  <img src="public/images/PlatformScreen.jpg" alt="nff platform" width="800">
+</p>
+
 ```
 you: "Run the sensor init sequence and assert the calibration values over serial"
 LLM: [writes firmware] → [compiles] → [flashes ESP32] → [reads serial] → returns structured output
