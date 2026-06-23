@@ -160,19 +160,26 @@ nff init
 ```
 
 This single command:
+- **Signs you in** to the nff platform (browser login) — required, because the MCP tools are gated behind your account
 - Detects your board by USB vendor/product ID
-- Writes `~/.nff/config.json` and a `CLAUDE.md` in the current directory
-- Registers the nff MCP server (`claude mcp add nff nff mcp`)
-- Installs the `/nff` and `/wokwi-diagram` Claude Code skills globally
+- Writes `~/.nff/config.json` (default device + build backend/board)
+- Installs the active backend's toolchain if missing (PlatformIO Core, or arduino-cli)
+- On the arduino backend with an ESP32, optionally enrolls the board on the nff platform (flash bootstrap firmware → claim into your dashboard)
+- Registers the nff MCP server with Claude Code (`claude mcp add --scope user --transport http nff http://127.0.0.1:3010/mcp`)
+- **Starts the MCP server in the background** so Claude Code finds it already running — no manual `nff mcp` needed
 
 ```
+  ✓ Signed in to the nff platform
   ✓ Found: ESP32 (CP210x) on COM10
   ✓ Config written to ~/.nff/config.json
-  ✓ CLAUDE.md written to ./CLAUDE.md
-  ✓ Claude skills installed: /nff, /wokwi-diagram
-  ✓ Registered with Claude Code CLI (claude mcp add nff nff mcp)
-  ✓ Claude Desktop config updated
+  ✓ Registered with Claude Code CLI (HTTP MCP on 127.0.0.1:3010)
+  ✓ Server running on http://127.0.0.1:3010/mcp
+
+✓ nff configured! Restart Claude Code to pick up the nff MCP server.
 ```
+
+> The background server runs until you reboot or stop it. After a reboot, run `nff mcp`
+> (or just re-run `nff init`) to bring it back up — `nff doctor` will tell you if it's down.
 
 ### 4. Verify
 
@@ -188,7 +195,7 @@ nff doctor
 
 | Command | Description |
 |---|---|
-| `nff init` | Detect board, write config, register MCP server |
+| `nff init` | Sign in, detect board, write config, register + start the MCP server |
 | `nff compile <path>` | Compile a sketch to verify it builds (no board/port needed) |
 | `nff flash <path>` | Compile and upload a sketch directory |
 | `nff monitor` | Stream serial output (Ctrl+C to exit) |
@@ -196,7 +203,7 @@ nff doctor
 | `nff repair` | Send captured serial/crash output to the diagnosis server for a structured root-cause |
 | `nff auth login` | Authenticate with the diagnosis server (browser OAuth or email/password) |
 | `nff doctor` | Check all dependencies and configuration |
-| `nff mcp` | Start the MCP server (streamable HTTP on `127.0.0.1:3000`; called automatically by Claude Code) |
+| `nff mcp` | Start the MCP server (streamable HTTP on `127.0.0.1:3010`; started in the background by `nff init`) |
 
 ```bash
 nff flash sketches/sensor_init
@@ -309,7 +316,7 @@ When you plug a board in, nff resolves it by USB vendor/product ID to a default 
 
 ## Claude Code Skills
 
-nff ships two Claude Code skills **automatically installed to `~/.claude/commands/` by `nff init`**:
+nff ships Claude Code skills bundled inside the package:
 
 | Skill | When to use |
 |---|---|
@@ -321,7 +328,7 @@ nff ships two Claude Code skills **automatically installed to `~/.claude/command
 /wokwi-diagram
 ```
 
-Skill files are bundled inside the package at `nff/nff/skills/` (the source of truth — edit them there) so they ship with every `pip install nff`, and are also mirrored in `.claude/commands/` for project-level use.
+Skill files live at `nff/skills/` (the source of truth — edit them there) so they ship with every `pip install nff`, and are also mirrored in `.claude/commands/` for project-level use. Copy them into `~/.claude/commands/` to make the slash commands available globally.
 
 ---
 

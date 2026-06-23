@@ -641,7 +641,12 @@ class _NffASGI:
             await self._handle_lifespan(receive, send)
         elif scope["type"] == "http":
             path: str = scope.get("path", "")
-            if path.startswith("/.well-known/") or path.startswith("/oauth/"):
+            if path == "/health":
+                # Unauthenticated liveness probe — lets `nff init`/`nff doctor` confirm
+                # the background server is up (and that it's *ours*). Does not touch /mcp,
+                # which stays bearer-gated below.
+                await self._send_json(send, 200, {"service": "nff", "ok": True})
+            elif path.startswith("/.well-known/") or path.startswith("/oauth/"):
                 await self._handle_oauth_route(path, scope, receive, send)
             elif path == "/mcp" or path.startswith("/mcp/"):
                 headers_dict = dict(scope.get("headers", []))

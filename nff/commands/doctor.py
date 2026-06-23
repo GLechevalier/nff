@@ -133,6 +133,24 @@ def check_lib_sync() -> Check:
     return Check(passed=True, detail=detail)
 
 
+def check_login() -> Check:
+    """Signed in to the nff platform? The MCP tools are gated behind this token."""
+    token = config.get_diagnosis_config().get("access_token")
+    if token:
+        return Check(passed=True, detail="signed in to the nff platform")
+    return Check(passed=False, detail="not signed in",
+                 fix="Run `nff auth login` (or `nff init`) to sign in")
+
+
+def check_mcp_server() -> Check:
+    """Is the background MCP server up? `nff init` starts it, but a reboot stops it."""
+    from nff.tools import daemon
+    if daemon.is_running():
+        return Check(passed=True, detail="running on http://127.0.0.1:3010/mcp")
+    return Check(passed=False, detail="MCP server not running",
+                 fix="Run `nff mcp` (or re-run `nff init`) to start it")
+
+
 def check_claude_desktop() -> Check:
     path = _CLAUDE_DESKTOP_CONFIG
     if not path.exists():
@@ -164,6 +182,8 @@ def doctor():
         checks.append(("nff lib", check_lib_sync()))
     checks += [
         ("Device", check_device()),
+        ("Login", check_login()),
+        ("MCP server", check_mcp_server()),
         ("Claude Desktop", check_claude_desktop()),
     ]
     any_failed = False

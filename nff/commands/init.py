@@ -10,6 +10,7 @@ from nff.tools import (
     auth as auth_tools,
     boards as boards_module,
     bootstrap,
+    daemon,
     installer,
     netinfo,
     provisioning_client,
@@ -78,6 +79,20 @@ def _ensure_logged_in() -> bool:
     config.set_diagnosis_tokens(tokens.access_token, tokens.refresh_token)
     click.echo("  ✓ Signed in")
     return True
+
+
+def _require_login() -> None:
+    """Login is mandatory: the MCP tools are gated behind it, and signing in is how
+    nff counts who's using it. Block until login succeeds (with one retry) or abort
+    init — there's no point configuring a bench whose tools stay locked."""
+    if _ensure_logged_in():
+        return
+    if click.confirm("\nLogin is required to use nff. Try again?", default=True):
+        if _ensure_logged_in():
+            return
+    click.echo("\nCouldn't sign in — nff's tools stay locked until you're logged in.")
+    click.echo("Run `nff auth login` once you're online, then re-run `nff init`.")
+    raise SystemExit(1)
 
 
 def _resolve_wifi() -> tuple[str, str]:
@@ -194,6 +209,11 @@ def init(port, baud, force, backend):
     is_pio = active_backend == "platformio"
 
     click.echo("Welcome to nff init!\n")
+
+    # Sign in first — the MCP tools are gated behind a valid token, so a bench that
+    # isn't logged in can't do anything. Aborts init if login fails.
+    _require_login()
+
     if is_pio:
         click.echo("Build backend: PlatformIO (board-universal)\n")
     click.echo("  1) Real board (USB)")
@@ -270,4 +290,13 @@ def init(port, baud, force, backend):
             config.set_default_device("", name, ident, 9600)
 
     _register_mcp()
-    click.echo("\n✓ nff configured! Run `nff doctor` to verify your setup.")
+
+    click.echo("\nStarting the nff MCP server in the background…")
+    if daemon.start_background():
+        click.echo("  ✓ Server running on http://127.0.0.1:3010/mcp")
+    else:
+        click.echo("  Couldn't start the server automatically — start it with `nff mcp`.")
+        click.echo(f"  (logs: {daemon.log_path()})")
+
+    click.echo("\n✓ nff configured! Restart Claude Code to pick up the nff MCP server.")
+    click.echo("  Verify anytime with `nff doctor`.")

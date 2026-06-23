@@ -256,6 +256,10 @@ def test_doctor_exits_0_when_all_checks_pass(tmp_path, monkeypatch):
     import serial as _serial
     monkeypatch.setattr(_serial, "Serial", lambda *a, **kw: MagicMock())
 
+    # Signed in + MCP server up — the two onboarding checks doctor now enforces.
+    cfg.set_diagnosis_tokens("acc", "ref")
+    monkeypatch.setattr("nff.tools.daemon.is_running", lambda *a, **kw: True)
+
     runner = CliRunner()
     result = runner.invoke(doctor, catch_exceptions=False)
     assert result.exit_code == 0, result.output
