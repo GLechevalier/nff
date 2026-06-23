@@ -16,7 +16,12 @@ fn main() {
         Commands::Monitor(args) => commands::monitor::run(&args),
         Commands::Doctor => commands::doctor::run(),
         Commands::Clean => commands::clean::run(),
-        Commands::Test => delegate_python(&["test"]),
+        Commands::Test => {
+            // The test suite is a development-only command; the shipped binary carries
+            // no Python runtime to delegate to.
+            eprintln!("`nff test` is a development-only command and isn't available in this binary.");
+            std::process::exit(2);
+        }
         Commands::Connect => commands::connect::run(),
         Commands::Ota => commands::ota::run(),
         Commands::InstallDeps(args) => commands::install_deps::run(&args),
@@ -46,16 +51,4 @@ fn main() {
         eprintln!("error: {e}");
         std::process::exit(1);
     }
-}
-
-fn delegate_python(args: &[&str]) -> anyhow::Result<()> {
-    let python = which::which("python")
-        .or_else(|_| which::which("python3"))
-        .map_err(|_| anyhow::anyhow!("Python not found — install Python 3.10+"))?;
-    let mut cmd_args = vec!["-m", "nff"];
-    cmd_args.extend_from_slice(args);
-    let status = std::process::Command::new(&python)
-        .args(&cmd_args)
-        .status()?;
-    std::process::exit(status.code().unwrap_or(1));
 }

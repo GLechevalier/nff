@@ -5,7 +5,6 @@ import pathlib
 import click
 from rich.console import Console
 
-from nff import config
 from nff.tools import toolchain
 
 console = Console()
@@ -13,17 +12,18 @@ console = Console()
 
 @click.command(name="compile")
 @click.argument("file", type=click.Path(exists=True))
-@click.option("--board", default=None, help="Board FQBN (defaults to configured board)")
+@click.option("--board", default=None,
+              help="Board: arduino-cli FQBN or PlatformIO board id (defaults to configured board)")
 @click.option("--json", "as_json", is_flag=True, help="Emit the raw JSON result")
 def compile_cmd(file, board, as_json):
     """Compile a sketch and report what was produced — never uploads.
 
-    FILE may be a .ino file or a sketch folder. No board connection is needed,
+    FILE may be a .ino/.cpp file or a sketch folder. No board connection is needed,
     so this is the fast way to check that a sketch builds.
     """
-    fqbn = board or config.get_default_device().get("fqbn") or ""
+    fqbn = board or toolchain.configured_board()
     if not fqbn:
-        raise click.ClickException("No board FQBN — pass --board or run `nff init`")
+        raise click.ClickException("No board — pass --board or run `nff init`")
 
     try:
         result = toolchain.compile_only(fqbn, source=pathlib.Path(file))

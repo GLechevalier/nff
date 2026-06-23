@@ -88,14 +88,16 @@ Always set minAngle: "-90" and maxAngle: "90" on wokwi-servo in diagram.json.
 
 ## Status
 
-> **CURRENT (2026-06): the Python package under `nff/nff/` is the active development surface.**
-> The Rust port (`nff-rs/`) is paused — do **not** treat it as the source of truth and do **not**
-> skip editing the Python files. `nff/nff/mcp_server.py`, `tools/toolchain.py`, and the commands
-> are the live implementation; new features (e.g. the port-free `compile` tool) land here first.
-> The Rust migration notes below are retained for when that work resumes later.
+> **CURRENT (2026-06): the Rust binary (`nff-rs/`) is the shipped product.** `pip install nff`
+> now delivers a per-platform wheel containing the compiled Rust binary (maturin `bindings="bin"`,
+> see `pyproject.toml`) — no Python runtime. The Rust port is at parity: all CLI commands, both
+> build backends (PlatformIO default + arduino), and the full MCP server (HTTP + OAuth proxy +
+> `/health` + background-daemon auto-start). The Python package under `nff/` remains as a
+> reference/prototype kept in sync version-for-version — **land features in BOTH** so they never
+> drift (prototype in Python if you like, but the shipped behavior is Rust).
 
-The Rust port aimed to replace the Python `nff` with a single compiled binary — no Python runtime
-for end users, stronger types, better cross-platform packaging.
+The Rust port replaces the Python `nff` with a single compiled binary — no Python runtime for end
+users, stronger types, better cross-platform packaging.
 
 The MCP server is now native Rust (`nff-rs/nff/src/mcp_server.rs`, rmcp crate). Wokwi
 integration is also native Rust (`tools/wokwi.rs`). Only `nff test` still delegates to the
@@ -110,53 +112,57 @@ equivalent is a `#[tool(...)]` method on `NffServer` in `nff-rs/nff/src/mcp_serv
 
 ### 1. Registration (`nff init`)
 
-`nff init` calls `register_mcp_claude_code()` (`commands/init.rs`) which runs:
+The live Python `nff init` calls `_register_mcp()` (`nff/commands/init.py`) which runs:
 
 ```
-claude mcp add --scope user nff <nff_exe_path> mcp
+claude mcp add --scope user --transport http nff http://127.0.0.1:3010/mcp
 ```
 
-This makes Claude Code aware of `nff mcp` as a user-scoped MCP server. The correct full
-form that includes the HTTP transport and Bearer token is:
+This registers `nff mcp` as a user-scoped, streamable-HTTP MCP server. The transport and
+URL are already included; the URL is passed positionally (there is no `--url` flag in this
+form). A Bearer `--header` is **not** added here — local bench tools need no auth, and the
+diagnosis tools carry their own token when they call the server.
 
-```
-claude mcp add --scope user --transport http \
-  --url http://127.0.0.1:3000/mcp \
-  --header "Authorization: Bearer <access_token>" nff
-```
-
-> **Gap:** `register_mcp_claude_code()` currently omits `--transport http`, `--url`, and
-> `--header`. Until this is fixed, run the full command above manually after `nff auth login`.
+> **Note:** the paused Rust port (`commands/init.rs`, `register_mcp_claude_code()`) was
+> specced to register over stdio (`claude mcp add --scope user nff <nff_exe_path> mcp`) and
+> still needs to be brought to parity with the Python HTTP form above when that work resumes.
 
 ### 2. Transport
 
-`nff mcp` starts a **streamable HTTP MCP server** on `http://127.0.0.1:3000/mcp`
+`nff mcp` starts a **streamable HTTP MCP server** on `http://127.0.0.1:3010/mcp`
 (default; override with `--host` / `--port`). All MCP messages — initialize, tools/list,
-tools/call — are HTTP POST requests to that path, handled by the `rmcp` crate.
+tools/call — are HTTP POST requests to that path.
 
 ### 3. Bearer authentication
 
-Every request to `/mcp` passes through the `bearer_auth` axum middleware
-(`mcp_server.rs`). It validates `Authorization: Bearer <token>` against
-`config.diagnosis.access_token` in `~/.nff/config.json`. A missing or wrong token
-returns HTTP 401 and Claude surfaces an "Unauthorized" error for every tool call.
+Every request to `/mcp` is gated by the bearer check in `_NffASGI` (`nff/mcp_server.py`).
+It validates `Authorization: Bearer <token>` against the opaque MCP token
+(`config.mcp.access_token`) — or, for back-compat, the legacy `config.diagnosis.access_token`
+— in `~/.nff/config.json`. A missing or wrong token returns HTTP 401 and Claude surfaces an
+"Unauthorized" error for every tool call. (`/health` is the one unauthenticated route, used
+only for liveness probing.) This gate is the whole reason the server is HTTP, not stdio:
+stdio can't gate the tools.
 
 **One-time bootstrap order:**
 
 ```
-1. nff auth login        # browser OAuth or direct email/password login
-                         # → writes access_token + refresh_token to ~/.nff/config.json
-2. nff init              # detects board, writes config, then calls register_mcp_claude_code()
-                         # (or register manually with the --header form above)
-3. Restart Claude Code   # Claude picks up the new MCP registration
+1. nff init              # signs you in (browser login, required), detects board,
+                         #   writes config, calls _register_mcp()
+                         #   (claude mcp add --scope user --transport http nff http://127.0.0.1:3010/mcp),
+                         #   then starts the MCP server in the background (daemon.start_background)
+2. Restart Claude Code   # Claude picks up the registration and connects to the running server;
+                         #   the OAuth proxy fast-path reuses the stored token (no second login)
 ```
+
+> The background server is started once by `nff init` and runs until reboot. After a reboot,
+> `nff mcp` (or re-running `nff init`) brings it back; `nff doctor` reports if it's down.
 
 ### 4. Tool call flow
 
 ```
 Claude Code
     │
-    │  HTTP POST  http://127.0.0.1:3000/mcp
+    │  HTTP POST  http://127.0.0.1:3010/mcp
     │  Authorization: Bearer <access_token>
     │  Body: MCP tools/call { "name": "...", "arguments": {...} }
     ▼

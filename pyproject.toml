@@ -1,6 +1,6 @@
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
 
 [project]
 name = "nff"
@@ -22,17 +22,8 @@ classifiers = [
     "Topic :: Software Development :: Embedded Systems",
     "Topic :: System :: Hardware",
 ]
-dependencies = [
-    "pyserial>=3.5",
-    "mcp>=1.0.0",
-    "click>=8.0",
-    "rich>=13.0",
-    "esptool>=4.0",
-    "requests>=2.28",
-]
-
-[project.scripts]
-nff = "nff:run"
+# No runtime dependencies: the wheel ships the self-contained Rust binary
+# (maturin bindings = "bin"); the `nff` command is that binary, not Python.
 
 [project.urls]
 Homepage = "https://github.com/GLechevalier/nff"
@@ -47,16 +38,15 @@ dev = [
     "ruff",
 ]
 
-[tool.hatchling.build]
-packages = ["nff"]
-
-[tool.hatch.build.targets.wheel]
-packages = ["nff"]
-
-# nff/assets (the bootstrap sketch + build_opt.h, consumed at runtime by `nff init`)
-# ships automatically as part of the `nff` package. A force-include here would add
-# the same paths a second time, which hatchling rejects ("A second file is being
-# added to the wheel archive at the same path").
+[tool.maturin]
+# Build the Rust binary from nff-rs/ and package it as the `nff` command. The wheel
+# is platform-specific and contains only the compiled binary — no Python package.
+bindings = "bin"
+manifest-path = "nff-rs/nff/Cargo.toml"
+# The reference Python package lives at ./nff, which maturin auto-detects (it matches the
+# project name) and would bundle. Exclude it so the wheel ships ONLY the binary — the
+# in-repo Python stays a dev/reference artifact, not shipped.
+exclude = ["nff/**"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

@@ -26,6 +26,8 @@ pub struct Config {
     pub mcp: McpConfig,
     #[serde(default)]
     pub agent: AgentConfig,
+    #[serde(default)]
+    pub build: BuildConfig,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -140,6 +142,30 @@ impl Default for WokwiConfig {
     }
 }
 
+fn default_backend() -> String {
+    "platformio".into()
+}
+
+/// Build backend selection. `backend` is "platformio" (default, board-universal) or
+/// "arduino"; `board` carries the PlatformIO board id (e.g. "esp32dev") used when the
+/// platformio backend is active — the arduino backend uses `default_device.fqbn` instead.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct BuildConfig {
+    #[serde(default = "default_backend")]
+    pub backend: String,
+    #[serde(default)]
+    pub board: Option<String>,
+}
+
+impl Default for BuildConfig {
+    fn default() -> Self {
+        BuildConfig {
+            backend: default_backend(),
+            board: None,
+        }
+    }
+}
+
 impl Default for Config {
     fn default() -> Self {
         Config {
@@ -149,11 +175,20 @@ impl Default for Config {
             diagnosis: DiagnosisConfig::default(),
             mcp: McpConfig::default(),
             agent: AgentConfig::default(),
+            build: BuildConfig::default(),
         }
     }
 }
 
 pub fn config_path() -> PathBuf {
+    // NFF_CONFIG_DIR overrides the config location — used by tests for deterministic
+    // isolation (HOME isn't honored by dirs::home_dir() on Windows), and handy for
+    // running multiple isolated nff setups.
+    if let Ok(dir) = std::env::var("NFF_CONFIG_DIR") {
+        if !dir.is_empty() {
+            return PathBuf::from(dir).join("config.json");
+        }
+    }
     home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".nff")
@@ -284,6 +319,46 @@ pub fn clear_mcp_tokens() -> Result<(), ConfigError> {
     save(&config)
 }
 
+#[allow(dead_code)]
+pub fn get_build_config() -> Result<BuildConfig, ConfigError> {
+    Ok(load()?.build)
+}
+
+pub fn set_build_backend(backend: &str) -> Result<(), ConfigError> {
+    let mut config = load()?;
+    config.build.backend = backend.into();
+    save(&config)
+}
+
+pub fn set_build_board(board: Option<&str>) -> Result<(), ConfigError> {
+    let mut config = load()?;
+    config.build.board = board.map(String::from);
+    save(&config)
+}
+
+/// Normalize a backend name to "arduino" or "platformio". "pio" aliases platformio;
+/// only an explicit "arduino"/"arduino-cli" selects the arduino-cli backend.
+fn normalize_backend(name: &str) -> String {
+    match name.trim().to_lowercase().as_str() {
+        "arduino" | "arduino-cli" => "arduino".into(),
+        _ => "platformio".into(),
+    }
+}
+
+/// The active build backend: "platformio" (default) or "arduino". Precedence:
+/// `NFF_BUILD_BACKEND` env var → `build.backend` in config → "platformio".
+pub fn active_backend() -> String {
+    if let Ok(env) = std::env::var("NFF_BUILD_BACKEND") {
+        if !env.trim().is_empty() {
+            return normalize_backend(&env);
+        }
+    }
+    let name = load()
+        .map(|c| c.build.backend)
+        .unwrap_or_else(|_| default_backend());
+    normalize_backend(&name)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -296,5 +371,34 @@ mod tests {
         assert_eq!(parsed.version, "1");
         assert_eq!(parsed.default_device.baud, 9600);
         assert_eq!(parsed.wokwi.default_timeout_ms, 5000);
+    }
+
+    #[test]
+    fn build_config_defaults_to_platformio() {
+        assert_eq!(BuildConfig::default().backend, "platformio");
+        assert!(BuildConfig::default().board.is_none());
+    }
+
+    #[test]
+    fn build_section_is_optional_in_legacy_config() {
+        // A config.json written before the build section existed must still parse.
+        let legacy = r#"{
+            "version": "1",
+            "default_device": {"port": null, "board": null, "fqbn": null, "baud": 9600},
+            "wokwi": {"api_token": null, "default_timeout_ms": 5000, "diagram_path": null}
+        }"#;
+        let parsed: Config = serde_json::from_str(legacy).unwrap();
+        assert_eq!(parsed.build.backend, "platformio");
+    }
+
+    #[test]
+    fn normalize_backend_aliases() {
+        assert_eq!(normalize_backend("pio"), "platformio");
+        assert_eq!(normalize_backend("platformio"), "platformio");
+        assert_eq!(normalize_backend("PlatformIO"), "platformio");
+        assert_eq!(normalize_backend("arduino"), "arduino");
+        assert_eq!(normalize_backend("arduino-cli"), "arduino");
+        assert_eq!(normalize_backend("  ARDUINO  "), "arduino");
+        assert_eq!(normalize_backend("nonsense"), "platformio");
     }
 }

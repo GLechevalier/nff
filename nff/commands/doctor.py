@@ -46,6 +46,24 @@ def check_arduino_cli() -> Check:
     )
 
 
+def check_build_backend() -> Check:
+    """The active build backend's tool: arduino-cli or PlatformIO."""
+    backend = toolchain.active_backend()
+    if backend == "platformio":
+        from nff.tools.backends import platformio as pio
+        ver = pio.platformio_version()
+        if ver:
+            return Check(passed=True, detail=f"platformio · {ver}")
+        return Check(
+            passed=False,
+            detail="platformio not found",
+            fix="Run `nff install-deps` to install PlatformIO",
+        )
+    arduino = check_arduino_cli()
+    return Check(passed=arduino.passed, detail=f"arduino-cli · {arduino.detail}",
+                 fix=arduino.fix, optional=arduino.optional)
+
+
 def check_esptool() -> Check:
     ver = toolchain.esptool_version()
     if ver:
@@ -115,6 +133,24 @@ def check_lib_sync() -> Check:
     return Check(passed=True, detail=detail)
 
 
+def check_login() -> Check:
+    """Signed in to the nff platform? The MCP tools are gated behind this token."""
+    token = config.get_diagnosis_config().get("access_token")
+    if token:
+        return Check(passed=True, detail="signed in to the nff platform")
+    return Check(passed=False, detail="not signed in",
+                 fix="Run `nff auth login` (or `nff init`) to sign in")
+
+
+def check_mcp_server() -> Check:
+    """Is the background MCP server up? `nff init` starts it, but a reboot stops it."""
+    from nff.tools import daemon
+    if daemon.is_running():
+        return Check(passed=True, detail="running on http://127.0.0.1:3010/mcp")
+    return Check(passed=False, detail="MCP server not running",
+                 fix="Run `nff mcp` (or re-run `nff init`) to start it")
+
+
 def check_claude_desktop() -> Check:
     path = _CLAUDE_DESKTOP_CONFIG
     if not path.exists():
@@ -135,12 +171,19 @@ def doctor():
     """Check that all nff dependencies are installed and configured."""
     checks = [
         ("Python", check_python()),
-        ("arduino-cli", check_arduino_cli()),
+        ("Build backend", check_build_backend()),
         ("esptool", check_esptool()),
         ("pyserial", check_pyserial()),
         ("Config", check_config()),
-        ("nff lib", check_lib_sync()),
+    ]
+    # The flattened nff Arduino library is an arduino-cli concept; the platformio
+    # backend materialises the SDK per-project, so this check only applies there.
+    if toolchain.active_backend() == "arduino":
+        checks.append(("nff lib", check_lib_sync()))
+    checks += [
         ("Device", check_device()),
+        ("Login", check_login()),
+        ("MCP server", check_mcp_server()),
         ("Claude Desktop", check_claude_desktop()),
     ]
     any_failed = False

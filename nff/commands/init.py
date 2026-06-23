@@ -10,6 +10,7 @@ from nff.tools import (
     auth as auth_tools,
     boards as boards_module,
     bootstrap,
+    daemon,
     installer,
     netinfo,
     provisioning_client,
@@ -23,6 +24,15 @@ _SIM_BOARDS = [
     ("Arduino Leonardo",  "arduino:avr:leonardo"),
     ("ESP32",             "esp32:esp32:esp32"),
     ("ESP8266",           "esp8266:esp8266:generic"),
+]
+
+# PlatformIO board ids offered in the simulation picker when the pio backend is active.
+_SIM_BOARDS_PIO = [
+    ("ESP32",             "esp32dev"),
+    ("ESP32-S3",          "esp32-s3-devkitc-1"),
+    ("ESP32-C3",          "esp32-c3-devkitm-1"),
+    ("Raspberry Pi Pico", "pico"),
+    ("Arduino Uno",       "uno"),
 ]
 
 # The bootstrap firmware runs Serial at 115200; keep the saved baud in sync so
@@ -69,6 +79,20 @@ def _ensure_logged_in() -> bool:
     config.set_diagnosis_tokens(tokens.access_token, tokens.refresh_token)
     click.echo("  ✓ Signed in")
     return True
+
+
+def _require_login() -> None:
+    """Login is mandatory: the MCP tools are gated behind it, and signing in is how
+    nff counts who's using it. Block until login succeeds (with one retry) or abort
+    init — there's no point configuring a bench whose tools stay locked."""
+    if _ensure_logged_in():
+        return
+    if click.confirm("\nLogin is required to use nff. Try again?", default=True):
+        if _ensure_logged_in():
+            return
+    click.echo("\nCouldn't sign in — nff's tools stay locked until you're logged in.")
+    click.echo("Run `nff auth login` once you're online, then re-run `nff init`.")
+    raise SystemExit(1)
 
 
 def _resolve_wifi() -> tuple[str, str]:
@@ -175,9 +199,23 @@ def _onboard_platform(device) -> None:
 @click.option("--port", default=None)
 @click.option("--baud", default=9600, type=int)
 @click.option("--force", is_flag=True)
-def init(port, baud, force):
+@click.option("--backend", type=click.Choice(["arduino", "platformio"]), default=None,
+              help="Build backend to use (default: keep current / arduino)")
+def init(port, baud, force, backend):
     """Interactive setup — detect board and configure nff."""
+    if backend:
+        config.set_build_backend(backend)
+    active_backend = backend or toolchain.active_backend()
+    is_pio = active_backend == "platformio"
+
     click.echo("Welcome to nff init!\n")
+
+    # Sign in first — the MCP tools are gated behind a valid token, so a bench that
+    # isn't logged in can't do anything. Aborts init if login fails.
+    _require_login()
+
+    if is_pio:
+        click.echo("Build backend: PlatformIO (board-universal)\n")
     click.echo("  1) Real board (USB)")
     click.echo("  2) Wokwi simulation")
     choice = click.prompt("Select mode", type=click.Choice(["1", "2"]))
@@ -196,35 +234,69 @@ def init(port, baud, force):
                 selected = devices[max(0, min(idx, len(devices) - 1))]
             resolved_port = port or selected.port
             board_name, fqbn = selected.board, selected.fqbn
+            if is_pio:
+                pio_board = selected.pio_board or click.prompt(
+                    "PlatformIO board id", default="esp32dev")
+                config.set_build_board(pio_board)
             config.set_default_device(resolved_port, board_name, fqbn, baud)
         else:
             if not port:
                 port = click.prompt("No boards detected. Enter port manually")
             resolved_port = port
             board_name = click.prompt("Board name")
-            fqbn = click.prompt("Board FQBN (e.g. esp32:esp32:esp32)")
+            if is_pio:
+                config.set_build_board(click.prompt("PlatformIO board id (e.g. esp32dev)"))
+                fqbn = ""
+            else:
+                fqbn = click.prompt("Board FQBN (e.g. esp32:esp32:esp32)")
             config.set_default_device(resolved_port, board_name, fqbn, baud)
 
-        if not toolchain.find_arduino_cli():
+        if is_pio:
+            from nff.tools.backends import platformio as pio
+            if not pio.find_platformio():
+                click.echo("\nPlatformIO not found — installing…")
+                ok, msg = pio.ensure_toolchain(emit=lambda l: click.echo(f"  {l}"))
+                if not ok:
+                    click.echo(f"Warning: could not install PlatformIO: {msg}")
+        elif not toolchain.find_arduino_cli():
             click.echo("\narduino-cli not found — installing…")
             try:
                 installer.install()
             except Exception as exc:
                 click.echo(f"Warning: could not install arduino-cli: {exc}")
 
-        device = types.SimpleNamespace(port=resolved_port, board=board_name, fqbn=fqbn)
-        if fqbn.startswith("esp32") and click.confirm(
-            "\nConnect this device to the nff platform now?", default=True
-        ):
-            _onboard_platform(device)
+        if is_pio:
+            click.echo("\nCloud platform onboarding currently runs on the arduino "
+                       "backend; skipping. Your board is configured for PlatformIO builds.")
+        else:
+            device = types.SimpleNamespace(port=resolved_port, board=board_name, fqbn=fqbn)
+            if fqbn.startswith("esp32") and click.confirm(
+                "\nConnect this device to the nff platform now?", default=True
+            ):
+                _onboard_platform(device)
 
     else:
+        sim_boards = _SIM_BOARDS_PIO if is_pio else _SIM_BOARDS
+        default_idx = 1 if is_pio else 5
         click.echo("\nAvailable boards:")
-        for i, (name, fqbn) in enumerate(_SIM_BOARDS, 1):
-            click.echo(f"  {i}) {name} ({fqbn})")
-        idx = click.prompt("Select board", type=int, default=5) - 1
-        name, fqbn = _SIM_BOARDS[max(0, min(idx, len(_SIM_BOARDS) - 1))]
-        config.set_default_device("", name, fqbn, 9600)
+        for i, (name, ident) in enumerate(sim_boards, 1):
+            click.echo(f"  {i}) {name} ({ident})")
+        idx = click.prompt("Select board", type=int, default=default_idx) - 1
+        name, ident = sim_boards[max(0, min(idx, len(sim_boards) - 1))]
+        if is_pio:
+            config.set_build_board(ident)
+            config.set_default_device("", name, "", 9600)
+        else:
+            config.set_default_device("", name, ident, 9600)
 
     _register_mcp()
-    click.echo("\n✓ nff configured! Run `nff doctor` to verify your setup.")
+
+    click.echo("\nStarting the nff MCP server in the background…")
+    if daemon.start_background():
+        click.echo("  ✓ Server running on http://127.0.0.1:3010/mcp")
+    else:
+        click.echo("  Couldn't start the server automatically — start it with `nff mcp`.")
+        click.echo(f"  (logs: {daemon.log_path()})")
+
+    click.echo("\n✓ nff configured! Restart Claude Code to pick up the nff MCP server.")
+    click.echo("  Verify anytime with `nff doctor`.")

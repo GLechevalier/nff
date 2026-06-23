@@ -11,16 +11,15 @@ pub fn run(args: &FlashArgs) -> Result<()> {
         bail!("Path does not exist: {}", file.display());
     }
 
-    // Resolve FQBN
+    // Resolve the board id for the active backend (PlatformIO board id or arduino FQBN).
     let device_cfg = config::get_default_device().unwrap_or_default();
-    let fqbn = args
-        .board
-        .clone()
-        .or_else(|| device_cfg.fqbn.clone())
-        .unwrap_or_default();
+    let fqbn = match &args.board {
+        Some(b) => b.clone(),
+        None => toolchain::configured_board(),
+    };
 
     if fqbn.is_empty() {
-        bail!("Missing board FQBN (use --board or run nff init)");
+        bail!("Missing board (use --board or run nff init)");
     }
 
     let port = args
@@ -33,9 +32,21 @@ pub fn run(args: &FlashArgs) -> Result<()> {
         bail!("Missing port (use --port or run nff init)");
     }
 
-    let sketch_dir = resolve_sketch(file)?;
+    // Normalise the sketch into a buildable directory for the active backend: pio
+    // scaffolds a project (src/main.cpp + platformio.ini), arduino uses a sketch folder.
+    let sketch_dir = if toolchain::pio_active() {
+        toolchain::resolve_sketch_dir(None, Some(file)).map_err(|e| anyhow::anyhow!("{e}"))?
+    } else {
+        resolve_sketch(file)?
+    };
 
     if args.sim {
+        if toolchain::pio_active() {
+            bail!(
+                "`flash --sim` is not yet supported on the PlatformIO backend; \
+                 set NFF_BUILD_BACKEND=arduino to simulate"
+            );
+        }
         println!(
             "  {}  →  {}  [sim]",
             sketch_dir.file_name().unwrap_or_default().to_string_lossy(),
@@ -63,6 +74,8 @@ pub fn run(args: &FlashArgs) -> Result<()> {
             println!("    {line}");
         }
     };
+    // Between-retries repair of a half-installed PlatformIO platform (no-op on arduino).
+    let recover = toolchain::package_recover(&fqbn);
 
     // Compile (retries transient toolchain hiccups; a real compile error fails fast).
     println!("\n  Compiling…");
@@ -70,6 +83,7 @@ pub fn run(args: &FlashArgs) -> Result<()> {
         || toolchain::stream_compile(&sketch_dir, &fqbn),
         &mut emit,
         toolchain::COMPILE_BACKOFF,
+        Some(&recover),
     );
     if rc != 0 {
         bail!("Compile failed (exit {rc})");
@@ -89,6 +103,7 @@ pub fn run(args: &FlashArgs) -> Result<()> {
         || toolchain::stream_upload(&sketch_dir, &fqbn, &port),
         &mut emit,
         toolchain::UPLOAD_BACKOFF,
+        Some(&recover),
     );
     if rc != 0 {
         bail!("Upload failed (exit {rc})");
@@ -142,6 +157,7 @@ fn run_simulation(sketch_dir: &Path, fqbn: &str, timeout_ms: u32) -> Result<()> 
         || toolchain::stream_compile(sketch_dir, fqbn),
         &mut emit,
         toolchain::COMPILE_BACKOFF,
+        None,
     );
     if rc != 0 {
         bail!("Compile failed (exit {rc})");

@@ -5,7 +5,9 @@ import json
 import os
 from pathlib import Path
 
-CONFIG_DIR = Path.home() / ".nff"
+# NFF_CONFIG_DIR overrides the config location (test isolation; multiple isolated setups).
+_CONFIG_OVERRIDE = os.environ.get("NFF_CONFIG_DIR")
+CONFIG_DIR = Path(_CONFIG_OVERRIDE) if _CONFIG_OVERRIDE else Path.home() / ".nff"
 CONFIG_PATH = CONFIG_DIR / "config.json"
 
 _DEFAULT = {
@@ -25,6 +27,12 @@ _DEFAULT = {
     # broker_host is the public mTLS broker the device dials; project_id/batch_id are
     # remembered so a re-run reuses the same project + bootstrap batch.
     "platform": {"broker_host": "152.228.219.243", "project_id": None, "batch_id": None},
+    # Build backend selection. `backend` = "platformio" (PlatformIO — board-universal,
+    # the default) or "arduino" (arduino-cli). `board` holds the PlatformIO board id
+    # (e.g. "esp32dev") when the pio backend is used; the arduino backend keeps using
+    # default_device.fqbn. The active backend can also be overridden per-run with the
+    # NFF_BUILD_BACKEND env var.
+    "build": {"backend": "platformio", "board": None},
 }
 
 
@@ -205,4 +213,29 @@ def set_platform_enrollment(project_id, batch_id) -> None:
     data.setdefault("platform", copy.deepcopy(_DEFAULT["platform"]))
     data["platform"]["project_id"] = project_id
     data["platform"]["batch_id"] = batch_id
+    save(data)
+
+
+def get_build_config() -> dict:
+    """Build backend config, merged over defaults so older config files (written
+    before this section existed) still return every key (backend in particular)."""
+    try:
+        cfg = copy.deepcopy(_DEFAULT["build"])
+        cfg.update(load().get("build", {}))
+        return cfg
+    except ConfigError:
+        return copy.deepcopy(_DEFAULT["build"])
+
+
+def set_build_backend(backend: str) -> None:
+    data = load() if exists() else copy.deepcopy(_DEFAULT)
+    data.setdefault("build", copy.deepcopy(_DEFAULT["build"]))
+    data["build"]["backend"] = backend
+    save(data)
+
+
+def set_build_board(board) -> None:
+    data = load() if exists() else copy.deepcopy(_DEFAULT)
+    data.setdefault("build", copy.deepcopy(_DEFAULT["build"]))
+    data["build"]["board"] = board
     save(data)

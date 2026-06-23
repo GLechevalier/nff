@@ -1,15 +1,14 @@
 use crate::cli::CompileArgs;
-use crate::tools::{config, toolchain};
+use crate::tools::toolchain;
 
 /// `nff compile <file>` — compile a sketch only (no upload, no port required).
 pub fn run(args: &CompileArgs) -> anyhow::Result<()> {
-    let fqbn = args
-        .board
-        .clone()
-        .or_else(|| config::get_default_device().ok().and_then(|d| d.fqbn))
-        .unwrap_or_default();
+    let fqbn = match &args.board {
+        Some(b) => b.clone(),
+        None => toolchain::configured_board(),
+    };
     if fqbn.is_empty() {
-        anyhow::bail!("No board FQBN — pass --board or run `nff init`");
+        anyhow::bail!("No board — pass --board or run `nff init`");
     }
 
     let result = toolchain::compile_only(&fqbn, None, Some(&args.file))

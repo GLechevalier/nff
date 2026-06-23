@@ -19,7 +19,7 @@ console = Console()
 
 @click.command()
 @click.argument("file", type=click.Path(exists=True))
-@click.option("--board", default=None, help="Board FQBN")
+@click.option("--board", default=None, help="Board: arduino-cli FQBN or PlatformIO board id")
 @click.option("--port", default=None, help="Serial port")
 @click.option("--baud", default=None, type=int)
 @click.option("--manual-reset", is_flag=True)
@@ -31,10 +31,10 @@ def flash(file, board, port, baud, manual_reset, sim, sim_timeout):
     FILE may be a .ino file or a sketch folder. To only check that a sketch
     builds (no board needed), use `nff compile` instead.
     """
-    # Resolve FQBN
-    fqbn = board or config.get_default_device().get("fqbn") or ""
+    # Resolve board (FQBN for arduino backend, PlatformIO board id for pio backend)
+    fqbn = board or toolchain.configured_board()
     if not fqbn:
-        raise click.ClickException("No board FQBN — pass --board or run `nff init`")
+        raise click.ClickException("No board — pass --board or run `nff init`")
 
     # Normalise the sketch into a compilable folder (handles .ino files and dirs).
     try:
@@ -74,13 +74,16 @@ def flash(file, board, port, baud, manual_reset, sim, sim_timeout):
 
     # Non-blocking: warn if a local nff-sdk-c checkout is newer than the synced
     # Arduino library, so "flash to test the fix" never silently builds old code.
-    warn = arduino_lib.local_sdk_newer_than_synced()
-    if warn:
-        console.print(f"[yellow]warning:[/yellow] {warn}")
+    # Arduino-backend only — the pio backend materialises the SDK per-project.
+    if toolchain.active_backend() == "arduino":
+        warn = arduino_lib.local_sdk_newer_than_synced()
+        if warn:
+            console.print(f"[yellow]warning:[/yellow] {warn}")
 
     console.print("[bold]Compiling…[/bold]")
     rc = toolchain.stream_with_retry(
-        lambda: toolchain.stream_compile(sketch_dir, fqbn), click.echo
+        lambda: toolchain.stream_compile(sketch_dir, fqbn), click.echo,
+        recover=toolchain.package_recover(fqbn),
     )
     if rc != 0:
         raise click.ClickException("Compile failed")

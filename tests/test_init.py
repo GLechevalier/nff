@@ -30,7 +30,9 @@ def _esp32(port="COM10"):
 
 def test_init_sim_path_writes_config(isolated_config):
     from nff import config as cfg
-    with patch("nff.commands.init._register_mcp") as mreg:
+    with patch("nff.commands.init._require_login"), \
+         patch("nff.commands.init.daemon.start_background", return_value=True), \
+         patch("nff.commands.init._register_mcp") as mreg:
         result = CliRunner().invoke(init, input="2\n5\n")  # sim, board #5 (ESP32)
     assert result.exit_code == 0, result.output
     assert "nff configured" in result.output
@@ -45,7 +47,9 @@ def test_init_sim_path_writes_config(isolated_config):
 
 def test_init_real_board_single_device_decline_onboarding(isolated_config):
     from nff import config as cfg
-    with patch("nff.commands.init.boards_module.list_devices", return_value=[_esp32()]), \
+    with patch("nff.commands.init._require_login"), \
+         patch("nff.commands.init.daemon.start_background", return_value=True), \
+         patch("nff.commands.init.boards_module.list_devices", return_value=[_esp32()]), \
          patch("nff.commands.init.toolchain.find_arduino_cli", return_value="/bin/arduino-cli"), \
          patch("nff.commands.init._onboard_platform") as monboard, \
          patch("nff.commands.init._register_mcp"):
@@ -60,7 +64,9 @@ def test_init_real_board_single_device_decline_onboarding(isolated_config):
 
 def test_init_real_board_multi_device_select_and_onboard(isolated_config):
     devices = [_esp32("COM3"), _esp32("COM10")]
-    with patch("nff.commands.init.boards_module.list_devices", return_value=devices), \
+    with patch("nff.commands.init._require_login"), \
+         patch("nff.commands.init.daemon.start_background", return_value=True), \
+         patch("nff.commands.init.boards_module.list_devices", return_value=devices), \
          patch("nff.commands.init.toolchain.find_arduino_cli", return_value="/bin/arduino-cli"), \
          patch("nff.commands.init._onboard_platform") as monboard, \
          patch("nff.commands.init._register_mcp"):
@@ -87,6 +93,33 @@ def test_register_mcp_invokes_claude_cli():
 def test_register_mcp_swallows_errors():
     with patch("nff.commands.init.subprocess.run", side_effect=FileNotFoundError("no claude")):
         init_mod._register_mcp()  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# _require_login — login is mandatory; init aborts if it fails
+# ---------------------------------------------------------------------------
+
+def test_require_login_returns_when_logged_in():
+    with patch("nff.commands.init._ensure_logged_in", return_value=True):
+        init_mod._require_login()  # must not raise
+
+
+def test_require_login_aborts_when_login_fails():
+    import pytest
+    # First attempt fails, user declines the retry → SystemExit.
+    with patch("nff.commands.init._ensure_logged_in", return_value=False), \
+         patch("nff.commands.init.click.confirm", return_value=False):
+        with pytest.raises(SystemExit):
+            init_mod._require_login()
+
+
+def test_init_starts_background_server(isolated_config):
+    with patch("nff.commands.init._require_login"), \
+         patch("nff.commands.init._register_mcp"), \
+         patch("nff.commands.init.daemon.start_background", return_value=True) as mstart:
+        result = CliRunner().invoke(init, input="2\n5\n")  # sim path
+    assert result.exit_code == 0, result.output
+    mstart.assert_called_once()
 
 
 # ---------------------------------------------------------------------------

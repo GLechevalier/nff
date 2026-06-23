@@ -149,12 +149,28 @@ def _extract_repo_root(data: bytes, into: Path) -> Path:
     return into / next(iter(tops))
 
 
-def install_nff_library(emit: Optional[Emit] = None) -> Path:
-    """Download nff-sdk-c, flatten it, and install it into arduino-cli's libraries dir.
+def install_nff_library(emit: Optional[Emit] = None, dest: Optional[Path] = None) -> Path:
+    """Flatten the nff-sdk-c into a flat Arduino library at ``dest``.
 
-    Returns the installed library path. Raises ``ArduinoLibError`` on failure.
+    ``dest`` defaults to arduino-cli's libraries dir (``resolve_lib_dir()``); the
+    PlatformIO backend passes a project-local ``<project>/lib/nff`` instead. When an
+    explicit ``dest`` is given (the pio case) a local nff-sdk-c checkout is preferred
+    so uncommitted edits are picked up; otherwise — and always for the default
+    arduino libraries dir — the default-branch tarball is downloaded. Returns the
+    installed path. Raises ``ArduinoLibError`` on failure.
     """
     emit = emit or (lambda _l: None)
+    explicit_dest = dest is not None
+    dest = Path(dest) if explicit_dest else resolve_lib_dir()
+
+    if explicit_dest:
+        local = _detect_local_sdk_src()
+        if local is not None:
+            emit(f"flattening local nff library from {local}")
+            flatten_sdk(local, dest)
+            emit(f"installed nff library -> {dest}")
+            return dest
+
     url = _tarball_url()
     emit(f"fetching nff library from {url}")
     try:
@@ -163,7 +179,6 @@ def install_nff_library(emit: Optional[Emit] = None) -> Path:
     except requests.RequestException as exc:
         raise ArduinoLibError(f"could not download nff SDK: {exc}") from exc
 
-    dest = resolve_lib_dir()
     with tempfile.TemporaryDirectory(prefix="nff_sdk_") as tmp:
         try:
             repo_root = _extract_repo_root(resp.content, Path(tmp))

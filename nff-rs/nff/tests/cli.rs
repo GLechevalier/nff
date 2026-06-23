@@ -218,9 +218,14 @@ fn flash_missing_board_exits_nonzero() {
     std::fs::create_dir_all(&sketch_dir).unwrap();
     std::fs::write(sketch_dir.join("blink.ino"), "void setup(){} void loop(){}").unwrap();
 
-    // Use a fake HOME so no config is loaded
+    // Point config resolution at an empty dir so NO config is loaded — must work on
+    // Windows too, where dirs::home_dir() ignores HOME/USERPROFILE (so a stray real
+    // config could otherwise make this test flash an attached board).
+    let cfg_dir = tmp.join("nff_cfg");
+    std::fs::create_dir_all(&cfg_dir).unwrap();
     let out = Command::new(nff())
         .args(["flash", sketch_dir.to_str().unwrap()])
+        .env("NFF_CONFIG_DIR", &cfg_dir)
         .env("HOME", &tmp)
         .env("USERPROFILE", &tmp)
         .current_dir(&tmp)

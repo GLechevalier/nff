@@ -46,6 +46,12 @@ pub struct InitArgs {
     pub baud: u32,
     #[arg(long, help = "Overwrite an existing config without prompting.")]
     pub force: bool,
+    #[arg(
+        long,
+        value_name = "BACKEND",
+        help = "Build backend: platformio (default, board-universal) or arduino."
+    )]
+    pub backend: Option<String>,
 }
 
 #[derive(Args)]

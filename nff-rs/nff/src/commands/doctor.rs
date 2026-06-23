@@ -1,4 +1,4 @@
-use crate::tools::{arduino_lib, boards, config, toolchain};
+use crate::tools::{arduino_lib, boards, config, daemon, toolchain};
 use anyhow::Result;
 
 struct Check {
@@ -36,12 +36,16 @@ impl Check {
 }
 
 pub fn run() -> Result<()> {
+    println!("  build backend: {}", config::active_backend());
     let checks = vec![
+        check_platformio(),
         check_arduino_cli(),
         check_esptool(),
         check_config(),
         check_lib_sync(),
         check_device(),
+        check_login(),
+        check_mcp_server(),
         check_claude_desktop(),
         check_wokwi_cli(),
     ];
@@ -88,6 +92,20 @@ fn check_lib_sync() -> Check {
     }
 }
 
+fn check_platformio() -> Check {
+    match crate::tools::pio::platformio_version() {
+        Some(v) => Check::ok(v),
+        None if toolchain::pio_active() => Check::fail(
+            "platformio not found  (the active build backend)",
+            "Run: nff install-deps",
+        ),
+        None => Check::warn(
+            "platformio not found  (optional — arduino backend is active)",
+            "Run `nff install-deps` to enable the board-universal PlatformIO backend",
+        ),
+    }
+}
+
 fn check_arduino_cli() -> Check {
     match toolchain::arduino_cli_version() {
         Some(v) => Check::ok(format!(
@@ -97,6 +115,12 @@ fn check_arduino_cli() -> Check {
                 .map(|p| p.display().to_string())
                 .unwrap_or_default()
         )),
+        // The arduino backend is opt-in; under the default PlatformIO backend a missing
+        // arduino-cli is fine, so don't fail the run over it.
+        None if toolchain::pio_active() => Check::warn(
+            "arduino-cli not found  (optional — PlatformIO backend is active)",
+            "Install from https://arduino.github.io/arduino-cli only if you need NFF_BUILD_BACKEND=arduino",
+        ),
         None => Check::fail(
             "arduino-cli not found",
             "Install from https://arduino.github.io/arduino-cli",
@@ -112,6 +136,11 @@ fn check_esptool() -> Check {
                 .unwrap_or_else(|| "python -m esptool".into());
             Check::ok(format!("{v}  ({loc})"))
         }
+        // PlatformIO bundles esptool inside its penv, so a missing PATH esptool is fine.
+        None if toolchain::pio_active() => Check::warn(
+            "esptool not found on PATH  (optional — bundled inside PlatformIO)",
+            "No action needed under the PlatformIO backend",
+        ),
         None => Check::fail("esptool not found", "Run: pip install esptool"),
     }
 }
@@ -146,6 +175,34 @@ fn check_device() -> Check {
         "Device detected: {} on {}  [sim: {}]",
         d.board, d.port, sim
     ))
+}
+
+fn check_login() -> Check {
+    // Signed in to the nff platform? The MCP tools are gated behind this token.
+    let signed_in = config::load()
+        .map(|c| c.diagnosis.access_token.is_some())
+        .unwrap_or(false);
+    if signed_in {
+        Check::ok("Signed in to the nff platform")
+    } else {
+        Check::fail("Not signed in", "Run `nff auth login` (or `nff init`) to sign in")
+    }
+}
+
+fn check_mcp_server() -> Check {
+    // `nff init` starts the background MCP server, but a reboot stops it.
+    if daemon::is_running(daemon::DEFAULT_HOST, daemon::DEFAULT_PORT) {
+        Check::ok(format!(
+            "MCP server running on http://{}:{}/mcp",
+            daemon::DEFAULT_HOST,
+            daemon::DEFAULT_PORT
+        ))
+    } else {
+        Check::fail(
+            "MCP server not running",
+            "Run `nff mcp` (or re-run `nff init`) to start it",
+        )
+    }
 }
 
 fn check_claude_desktop() -> Check {

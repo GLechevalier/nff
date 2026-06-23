@@ -59,9 +59,31 @@ fn weak_transient_re() -> &'static Regex {
     })
 }
 
+fn pio_package_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    // PlatformIO package-manager faults on a first build: a transient download/IO
+    // hiccup (package-manager-ioerror) or the half-installed-framework leftover that
+    // surfaces as a missing pins_arduino.h. These carry "error:" yet are NOT code
+    // faults, so — like the strong signals — they win over is_compile_error. The
+    // platformio backend keys its best-effort package prune off this same pattern.
+    RE.get_or_init(|| {
+        Regex::new(concat!(
+            r"(?i)package-manager-ioerror|packageexception",
+            r"|pins_arduino\.h: no such file",
+            r"|tool-\S+ is not installed|platform \S+ is not installed",
+        ))
+        .unwrap()
+    })
+}
+
 /// True if the output carries a genuine compiler `error:` diagnostic.
 pub fn is_compile_error(output: &str) -> bool {
     compile_error_re().is_match(output)
+}
+
+/// True if the output carries a PlatformIO package-manager fault (transient + prunable).
+pub fn is_pio_package_error(output: &str) -> bool {
+    pio_package_re().is_match(output)
 }
 
 /// Classify a failure as a transient (retryable) toolchain/OS hiccup.
@@ -74,7 +96,7 @@ pub fn is_transient(output: &str) -> bool {
     if output.is_empty() {
         return false;
     }
-    if strong_transient_re().is_match(output) {
+    if strong_transient_re().is_match(output) || pio_package_re().is_match(output) {
         return true;
     }
     if is_compile_error(output) {
@@ -116,6 +138,31 @@ where
         let text = result.text();
         let first = text.lines().next().unwrap_or("");
         on_retry(i + 1, first);
+        sleep(delay_for(i, backoff));
+    }
+    unreachable!("loop returns on i == retries")
+}
+
+/// Like [`run_with_retry`] but also calls `recover(full_output)` just before the
+/// backoff sleep — a hook for best-effort repair (e.g. pruning a broken PlatformIO
+/// package) so the next attempt starts clean.
+pub fn run_with_retry_recover<T, F>(
+    mut attempt: F,
+    backoff: &[f64],
+    mut recover: impl FnMut(&str),
+    sleep: impl Fn(f64),
+) -> T
+where
+    T: RetryOutcome,
+    F: FnMut() -> T,
+{
+    let retries = backoff.len();
+    for i in 0..=retries {
+        let result = attempt();
+        if result.succeeded() || i == retries || !is_transient(&result.text()) {
+            return result;
+        }
+        recover(&result.text());
         sleep(delay_for(i, backoff));
     }
     unreachable!("loop returns on i == retries")
@@ -252,6 +299,47 @@ mod tests {
         );
         assert!(r.succeeded());
         assert_eq!(n, 2);
+    }
+
+    #[test]
+    fn pio_package_faults_are_transient() {
+        for s in [
+            "PlatformIO: package-manager-ioerror while downloading",
+            "PackageException: Could not install package",
+            "fatal error: pins_arduino.h: No such file or directory",
+            "Error: Platform 'espressif32' is not installed",
+        ] {
+            assert!(is_transient(s), "expected transient: {s}");
+            assert!(is_pio_package_error(s), "expected pio package error: {s}");
+        }
+        assert!(!is_pio_package_error("error: expected ';'"));
+    }
+
+    #[test]
+    fn run_with_retry_recover_invokes_recover_between_attempts() {
+        let mut n = 0;
+        let mut recovered: Vec<String> = Vec::new();
+        let r = run_with_retry_recover(
+            || {
+                n += 1;
+                if n == 1 {
+                    Out {
+                        ok: false,
+                        msg: "package-manager-ioerror".into(),
+                    }
+                } else {
+                    Out {
+                        ok: true,
+                        msg: "ok".into(),
+                    }
+                }
+            },
+            DEFAULT_BACKOFF,
+            |out| recovered.push(out.to_string()),
+            |_| {},
+        );
+        assert!(r.succeeded());
+        assert_eq!(recovered, vec!["package-manager-ioerror".to_string()]);
     }
 
     #[test]

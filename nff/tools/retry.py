@@ -48,6 +48,18 @@ _WEAK_TRANSIENT = re.compile(
     re.IGNORECASE,
 )
 
+# PlatformIO package-manager faults on a first build: a transient download/IO hiccup
+# (package-manager-ioerror) or the half-installed-framework leftover that surfaces as a
+# missing pins_arduino.h. These carry "error:" yet are NOT code faults, so — like the
+# strong signals — they win over is_compile_error. The platformio backend also keys its
+# best-effort package prune off this pattern (see _recover_packages).
+_PIO_PACKAGE = re.compile(
+    r"package-manager-ioerror|packageexception"
+    r"|pins_arduino\.h: no such file"
+    r"|tool-\S+ is not installed|platform \S+ is not installed",
+    re.IGNORECASE,
+)
+
 
 def is_compile_error(output: str) -> bool:
     """True if the output carries a genuine compiler ``error:`` diagnostic."""
@@ -64,7 +76,7 @@ def is_transient(output: str) -> bool:
     """
     if not output:
         return False
-    if _STRONG_TRANSIENT.search(output):
+    if _STRONG_TRANSIENT.search(output) or _PIO_PACKAGE.search(output):
         return True
     if is_compile_error(output):
         return False
@@ -82,6 +94,7 @@ def run_with_retry(
     retries: int = DEFAULT_RETRIES,
     backoff: Tuple[float, ...] = DEFAULT_BACKOFF,
     on_retry: Optional[Callable[[int, str], None]] = None,
+    recover: Optional[Callable[[str], None]] = None,
     sleep: Callable[[float], None] = time.sleep,
 ):
     """Run a non-streaming ``attempt`` (returning a ``RunResult``) with retry.
@@ -89,6 +102,9 @@ def run_with_retry(
     ``attempt`` must return an object with ``.success`` (bool) and ``.output``
     (str). Retries only while ``classify(output)`` is True and attempts remain;
     returns the last result on success, exhaustion, or a non-transient failure.
+    ``recover``, if given, is called with the full failure output just before the
+    backoff sleep — a hook for best-effort repair (e.g. pruning a broken package)
+    so the next attempt starts clean.
     """
     result = None
     for i in range(retries + 1):
@@ -100,6 +116,8 @@ def run_with_retry(
         if on_retry is not None:
             first = result.output.splitlines()[0] if result.output else ""
             on_retry(i + 1, first)
+        if recover is not None:
+            recover(result.output)
         sleep(_delay_for(i, backoff))
     return result
 
@@ -112,6 +130,7 @@ def stream_with_retry(
     classify: Callable[[str], bool] = is_transient,
     retries: int = DEFAULT_RETRIES,
     backoff: Tuple[float, ...] = DEFAULT_BACKOFF,
+    recover: Optional[Callable[[str], None]] = None,
     sleep: Callable[[float], None] = time.sleep,
 ) -> int:
     """Run a live-streaming command with retry, preserving the echo UX.
@@ -119,7 +138,9 @@ def stream_with_retry(
     ``make_stream`` builds a fresh (single-use) stream per attempt; ``run_attempt``
     consumes one stream, echoing each line via ``emit`` and returning
     ``(returncode, captured_output)``. On a transient non-zero result an explicit
-    banner is emitted and a fresh stream is started. Returns the final returncode.
+    banner is emitted and a fresh stream is started. ``recover``, if given, is called
+    with the captured output before the backoff sleep for best-effort repair. Returns
+    the final returncode.
     """
     rc = 0
     for i in range(retries + 1):
@@ -133,5 +154,7 @@ def stream_with_retry(
             f"[nff] transient failure (rc={rc}); retrying in {delay:.0f}s "
             f"(attempt {i + 2}/{retries + 1})…"
         )
+        if recover is not None:
+            recover(out)
         sleep(delay)
     return rc
