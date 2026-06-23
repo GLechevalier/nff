@@ -1,4 +1,17 @@
-# nff — LLM bridge to hardware
+<p align="center">
+  <img src="public/images/tumbnail.png" alt="nff" width="640">
+</p>
+
+<h1 align="center">nff — LLM bridge to hardware</h1>
+
+<p align="center">
+  <a href="https://pypi.org/project/nff/"><img alt="PyPI" src="https://img.shields.io/pypi/v/nff?color=2b9348&label=pypi"></a>
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green"></a>
+  <img alt="Built with Rust" src="https://img.shields.io/badge/built%20with-Rust-dea584?logo=rust&logoColor=white">
+  <img alt="Boards" src="https://img.shields.io/badge/boards-1000%2B%20(PlatformIO)-orange?logo=platformio&logoColor=white">
+  <img alt="MCP" src="https://img.shields.io/badge/MCP-server-8A2BE2">
+  <a href="https://nanoforgeflow.com"><img alt="nff platform" src="https://img.shields.io/badge/platform-nanoforgeflow.com-111"></a>
+</p>
 
 nff is an MCP server that gives LLMs direct control over physical hardware — on the bench during development, and in the field for maintenance and diagnosis.
 
