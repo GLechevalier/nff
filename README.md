@@ -14,9 +14,28 @@ you: "Why did the unit in the field just hard-fault?"
 LLM: [captures panic over OTA] → [reads registers + backtrace] → "Stack overflow in your sensor ISR at line 47"
 ```
 
-**Supported boards:** with the **PlatformIO backend** (now the default in the Python implementation) nff is board-universal — any of PlatformIO's ~1000 boards (every ESP32 variant, RP2040/Pico, STM32, classic AVR, …), with the platform toolchain auto-installed on first build. The classic **arduino-cli backend** remains available and covers ESP32 (CP210x / CH340) · ESP8266 (FTDI) · Arduino AVR (Uno, Mega, Nano, Leonardo). See [Build backends](#build-backends).
+**Supported boards:** with the **PlatformIO backend** (now the default in both the shipped Rust binary and the Python implementation) nff is board-universal — any of PlatformIO's ~1000 boards (every ESP32 variant, RP2040/Pico, STM32, classic AVR, …), with the platform toolchain auto-installed on first build. The classic **arduino-cli backend** remains available and covers ESP32 (CP210x / CH340) · ESP8266 (FTDI) · Arduino AVR (Uno, Mega, Nano, Leonardo). See [Build backends](#build-backends).
 
-**Shipped as a single Rust binary.** The release artifact is the compiled `nff` binary built from `nff-rs/` — a self-contained executable with no Python runtime required. The Python package under `nff/nff/` remains as the reference/prototyping implementation (features are often prototyped there first, then ported to Rust at parity); both are kept in sync, version for version. The Rust port is at full feature parity (CLI commands, MCP server + OAuth proxy, the bench-loop hardening, and the `nff pi` Raspberry-Pi probe).
+**Shipped as a single Rust binary.** The release artifact is the compiled `nff` binary built from `nff-rs/` — a self-contained executable with no Python runtime required. The Python package under `nff/nff/` remains as the reference/prototyping implementation (features are often prototyped there first, then ported to Rust at parity); both are kept in sync, version for version. The Rust port is at full feature parity (CLI commands, MCP server + OAuth proxy, the bench-loop hardening, the PlatformIO build backend, and the `nff pi` Raspberry-Pi probe).
+
+---
+
+## What's new — PlatformIO backend in the shipped Rust binary (unreleased)
+
+The board-universal **PlatformIO backend** — previously only in the Python prototype — is now ported into the shipped Rust binary (`nff-rs/`), so `pip install nff` users get it. **PlatformIO is now the default backend** in both implementations; the classic arduino-cli backend stays available via `NFF_BUILD_BACKEND=arduino` (or `build.backend` in `~/.nff/config.json`). See [Build backends](#build-backends).
+
+### Carried over — four PlatformIO hardening fixes
+- **Your own `platformio.ini` is respected.** A project that ships its own `platformio.ini` (custom partitions, PSRAM, build flags) is built as-is and never overwritten.
+- **Multi-file sketches build.** A sketch folder with helper `.cpp`/`.h` files or multiple `.ino` tabs now copies every file into the build, not just the first.
+- **First-build package flakes self-heal.** A transient PlatformIO `package-manager-ioerror` (or a half-installed framework surfacing as a missing `pins_arduino.h`) is classified as transient, and the broken platform is pruned + reinstalled on retry.
+- **`nff clean` clears PlatformIO output too** (`nff_pio` temp root, including the heavy `.pio/build`), not just the arduino temp dir.
+
+### Tooling
+- **`nff doctor`** shows the active backend and checks PlatformIO Core; under the PlatformIO backend a missing arduino-cli/esptool is informational, not a failure.
+- **`nff install-deps`** auto-installs PlatformIO Core.
+- **`nff init --backend <platformio|arduino>`** persists the backend and seeds the PlatformIO board id from the detected device.
+
+> **Note:** `flash --sim` (Wokwi) is not yet wired for the PlatformIO backend — use `NFF_BUILD_BACKEND=arduino` to simulate. Verified end-to-end against real PlatformIO + ESP32; 105 cargo tests pass and `cargo clippy -- -D warnings` is clean.
 
 ---
 
