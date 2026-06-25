@@ -8,6 +8,14 @@ pub const BOARD_MAP: &[(u16, u16, &str, &str)] = &[
     (0x10c4, 0xea60, "ESP32 (CP210x)", "esp32:esp32:esp32"),
     (0x1a86, 0x7523, "ESP32 (CH340)", "esp32:esp32:esp32"),
     (0x0403, 0x6001, "ESP8266 (FTDI)", "esp8266:esp8266:generic"),
+    // STMicroelectronics ST-Link debug+VCP bridges (on-board on Nucleo/Discovery and most
+    // STM32 dev boards) and the DFU bootloader. One VID:PID covers many distinct STM32
+    // boards, so the fqbn is only a sensible default the user can override with --board.
+    (0x0483, 0x3748, "STM32 (ST-Link V2)", "STMicroelectronics:stm32:Nucleo_64"),
+    (0x0483, 0x374b, "STM32 (ST-Link V2-1)", "STMicroelectronics:stm32:Nucleo_64"),
+    (0x0483, 0x374e, "STM32 (ST-Link V3)", "STMicroelectronics:stm32:Nucleo_64"),
+    (0x0483, 0x374f, "STM32 (ST-Link V3)", "STMicroelectronics:stm32:Nucleo_64"),
+    (0x0483, 0xdf11, "STM32 (DFU bootloader)", "STMicroelectronics:stm32:GenF1"),
 ];
 
 /// PlatformIO board catalog: board id → platform. Supplies the platform for the common
@@ -123,6 +131,16 @@ mod tests {
                 vid == 0x10c4 && pid == 0xea60 && fqbn == "esp32:esp32:esp32"
             }),
             "ESP32 CP210x (10c4:ea60) missing from BOARD_MAP"
+        );
+    }
+
+    #[test]
+    fn board_map_contains_stlink_v2_1() {
+        assert!(
+            BOARD_MAP.iter().any(|&(vid, pid, name, _)| {
+                vid == 0x0483 && pid == 0x374b && name == "STM32 (ST-Link V2-1)"
+            }),
+            "STM32 ST-Link V2-1 (0483:374b) missing from BOARD_MAP"
         );
     }
 

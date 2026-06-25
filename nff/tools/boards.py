@@ -17,6 +17,14 @@ BOARD_MAP: dict[tuple[int, int], dict] = {
     (0x10c4, 0xea60): {"name": "ESP32 (CP210x)",    "fqbn": "esp32:esp32:esp32",       "pio_board": "esp32dev"},
     (0x1a86, 0x7523): {"name": "ESP32 (CH340)",     "fqbn": "esp32:esp32:esp32",       "pio_board": "esp32dev"},
     (0x0403, 0x6001): {"name": "ESP8266 (FTDI)",    "fqbn": "esp8266:esp8266:generic", "pio_board": "esp01_1m"},
+    # STMicroelectronics ST-Link debug+VCP bridges (on-board on Nucleo/Discovery and most
+    # STM32 dev boards) and the DFU bootloader. One VID:PID covers many distinct STM32
+    # boards, so fqbn/pio_board are only sensible defaults the user can override with --board.
+    (0x0483, 0x3748): {"name": "STM32 (ST-Link V2)",         "fqbn": "STMicroelectronics:stm32:Nucleo_64", "pio_board": "nucleo_f401re"},
+    (0x0483, 0x374b): {"name": "STM32 (ST-Link V2-1)",       "fqbn": "STMicroelectronics:stm32:Nucleo_64", "pio_board": "nucleo_f401re"},
+    (0x0483, 0x374e): {"name": "STM32 (ST-Link V3)",         "fqbn": "STMicroelectronics:stm32:Nucleo_64", "pio_board": "nucleo_f401re"},
+    (0x0483, 0x374f): {"name": "STM32 (ST-Link V3)",         "fqbn": "STMicroelectronics:stm32:Nucleo_64", "pio_board": "nucleo_f401re"},
+    (0x0483, 0xdf11): {"name": "STM32 (DFU bootloader)",     "fqbn": "STMicroelectronics:stm32:GenF1",      "pio_board": "genericSTM32F103C8"},
 }
 
 # PlatformIO board catalog: board id → {platform, framework}. PlatformIO supports ~1000

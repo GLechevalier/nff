@@ -17,7 +17,8 @@
       "Bash(python -m pytest tests/test_mcp.py -v --tb=short)",
       "Bash(python -c \"import nff.cli\")",
       "mcp__nff__flash",
-      "mcp__nff__compile"
+      "mcp__nff__compile",
+      "mcp__nff__list_devices"
     ]
   },
   "enabledMcpjsonServers": [
