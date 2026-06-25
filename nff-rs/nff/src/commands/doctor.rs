@@ -47,7 +47,6 @@ pub fn run() -> Result<()> {
         check_login(),
         check_mcp_server(),
         check_claude_desktop(),
-        check_wokwi_cli(),
     ];
 
     let mut any_failed = false;
@@ -166,15 +165,11 @@ fn check_device() -> Check {
     if devices.is_empty() {
         return Check::warn(
             "No recognised board detected",
-            "Plug in a board and run `nff init`  (or use `nff flash --sim` / Wokwi tools without hardware)",
+            "Plug in a board and run `nff init`",
         );
     }
     let d = &devices[0];
-    let sim = d.wokwi_chip.as_deref().unwrap_or("no Wokwi support");
-    Check::ok(format!(
-        "Device detected: {} on {}  [sim: {}]",
-        d.board, d.port, sim
-    ))
+    Check::ok(format!("Device detected: {} on {}", d.board, d.port))
 }
 
 fn check_login() -> Check {
@@ -237,24 +232,4 @@ fn check_claude_desktop() -> Check {
         "Claude Desktop config OK  ({})",
         cfg_path.display()
     ))
-}
-
-fn check_wokwi_cli() -> Check {
-    match toolchain::wokwi_cli_version() {
-        Some(v) => {
-            let loc = toolchain::find_wokwi_cli()
-                .map(|p| p.display().to_string())
-                .unwrap_or_default();
-            Check {
-                passed: true,
-                detail: format!("{v}  ({loc})"),
-                fix: None,
-                optional: true,
-            }
-        }
-        None => Check::warn(
-            "wokwi-cli not found  (optional — required for --sim and nff wokwi)",
-            "Install from https://github.com/wokwi/wokwi-cli",
-        ),
-    }
 }

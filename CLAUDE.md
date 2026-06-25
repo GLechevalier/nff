@@ -1,90 +1,9 @@
-# nff — Wokwi Simulation Context
-
-## Hard Rules
-- To check a sketch builds, use `nff compile <sketch>` (no board/port needed) — never call arduino-cli directly.
-- Use `nff flash --sim` to compile + simulate, and `nff flash <sketch>` to upload to hardware.
-- Always use `nff wokwi run` or `nff wokwi run --gui` to simulate.
-- Never install libraries with arduino-cli. Use built-in ESP32 APIs only,
-  or ask the user to install the library first.
-- For ESP32 servo/PWM use ledcAttach + ledcWrite (built-in LEDC, no library).
-
-## Project
-- Board : arduino:avr:uno
-- FQBN  : arduino:avr:uno
-- Chip  : wokwi-arduino-uno
-
----
-
-## Simulation Pipeline
-
-```
-1. Write sketch      sketches/<name>/<name>.ino
-2. Edit circuit      diagram.json  (add components + wiring)
-3. Compile           nff flash --sim sketches/<name> --board arduino:avr:uno
-4. Visual sim        nff wokwi run --gui
-   Headless sim      nff wokwi run [--timeout MS] [--serial-log FILE]
-5. Fix bugs, repeat from step 3
-```
-
-wokwi.toml must point to the compiled ELF:
-  firmware = "sketches/<name>/build/arduino.avr.uno/<name>.elf/<name>.ino.elf"
-
----
-
-## diagram.json — Component Wiring
-
-Always wire the serial monitor:
-  ["esp:TX0", "$serialMonitor:RX", "", []]
-  ["esp:RX0", "$serialMonitor:TX", "", []]
-
-ESP32 pin names: esp:D<gpio>  esp:GND.1  esp:GND.2  esp:3V3  esp:VIN
-
-Common components:
-  wokwi-led          attrs: color (red/green/blue/yellow)
-  wokwi-pushbutton   attrs: color — pins: btn:1.l (gpio side), btn:2.l (GND side)
-  wokwi-servo        attrs: minAngle "-90", maxAngle "90" — pins: PWM, V+, GND
-  wokwi-resistor     attrs: value (ohms)
-
-Pushbutton wiring (with INPUT_PULLUP in sketch):
-  ["esp:D15", "btn1:1.l", "green", []]
-  ["esp:GND.2", "btn1:2.l", "black", []]
-
-Servo connection:
-  ["esp:D18",  "srv1:PWM", "orange", []]
-  ["esp:3V3",  "srv1:V+",  "red",    []]
-  ["esp:GND.1","srv1:GND", "black",  []]
-
----
-
-## ESP32 Servo — LEDC (no library required)
-
-Wokwi servo maps its full range to 500 µs – 2500 µs.
-50 Hz / 16-bit resolution (max count 65 535, period 20 000 µs):
-
-  −90°  →  duty 1638   (500 µs)
-    0°  →  duty 4915  (1500 µs)
-  +90°  →  duty 8192  (2500 µs)
-
-```cpp
-ledcAttach(SERVO_PIN, 50, 16);   // ESP32 Arduino core 3.x
-ledcWrite(SERVO_PIN, 4915);      // center
-```
-
-Always set minAngle: "-90" and maxAngle: "90" on wokwi-servo in diagram.json.
-
----
-
-## Debugging
-
-- Compile error     → fix sketch, re-run nff flash --sim
-- Wrong output      → nff wokwi run --serial-log out.txt, inspect out.txt
-- Component silent  → check diagram.json pin names and connection direction
-- Servo wrong angle → verify duty values match the 500–2500 µs Wokwi range
-- Button not firing → INPUT_PULLUP + wiring gpio→btn:1.l, GND→btn:2.l
-
----
-
 # nff — Rust Architecture
+
+> **Simulation note:** Wokwi simulation was split out of `nff` into the separate **nff-sim**
+> package (`../nff-sim`). `nff` is hardware-only — compile, flash, monitor. Nothing about
+> Wokwi (the `--sim` flag, `nff wokwi`, diagram.json, the wokwi config/board-chip metadata)
+> remains in this repo.
 
 ## Status
 
@@ -99,9 +18,8 @@ Always set minAngle: "-90" and maxAngle: "90" on wokwi-servo in diagram.json.
 The Rust port replaces the Python `nff` with a single compiled binary — no Python runtime for end
 users, stronger types, better cross-platform packaging.
 
-The MCP server is now native Rust (`nff-rs/nff/src/mcp_server.rs`, rmcp crate). Wokwi
-integration is also native Rust (`tools/wokwi.rs`). Only `nff test` still delegates to the
-Python package via subprocess.
+The MCP server is now native Rust (`nff-rs/nff/src/mcp_server.rs`, rmcp crate). Only
+`nff test` still delegates to the Python package via subprocess.
 
 **Adding a new MCP tool (current Python flow):** add an `async def` handler in
 `nff/nff/mcp_server.py`, register it in both `_TOOLS` (with an `inputSchema`) and `_DISPATCH`.
@@ -169,9 +87,8 @@ Claude Code
 nff mcp server  (bearer_auth validates token vs ~/.nff/config.json)
     │
     ├──► local tools
-    │       list_devices, flash, serial_read, serial_write,
-    │       reset_device, get_device_info,
-    │       wokwi_flash, wokwi_serial_read, wokwi_get_diagram
+    │       list_devices, compile, flash, serial_read, serial_write,
+    │       reset_device, get_device_info
     │       — operate on local hardware / toolchain; no further auth
     │
     └──► diagnosis tools
@@ -187,7 +104,7 @@ nff mcp server  (bearer_auth validates token vs ~/.nff/config.json)
 |---|---|
 | Success (scalar) | `"OK: …"` string |
 | Failure | `"ERROR: …"` string |
-| Structured data | JSON string (`list_devices`, `get_device_info`, `wokwi_flash`, `repair`) |
+| Structured data | JSON string (`list_devices`, `get_device_info`, `compile`, `repair`) |
 
 Claude can branch on the `OK:` / `ERROR:` prefix without parsing JSON for scalar results.
 
@@ -297,7 +214,6 @@ pub enum Commands {
     Init(InitArgs),
     Flash(FlashArgs),
     Monitor(MonitorArgs),
-    Wokwi(WokwiCommand),
     Doctor,
     Clean,
     Test,
@@ -329,10 +245,6 @@ pub struct FlashArgs {
     pub baud: Option<u32>,
     #[arg(long)]
     pub manual_reset: bool,
-    #[arg(long)]
-    pub sim: bool,
-    #[arg(long, default_value = "5000", value_name = "MS")]
-    pub sim_timeout: u32,
 }
 
 #[derive(Args)]
@@ -349,23 +261,7 @@ pub struct MonitorArgs {
 pub struct InstallDepsArgs {
     #[arg(long)]
     pub force: bool,
-    #[arg(long)]
-    pub skip_wokwi: bool,
 }
-
-// Wokwi is a subcommand group; its subcommands delegate to Python.
-#[derive(Args)]
-pub struct WokwiCommand {
-    #[command(subcommand)]
-    pub sub: WokwiSubcommands,
-}
-
-#[derive(Subcommand)]
-pub enum WokwiSubcommands {
-    Init(WokwiInitArgs),
-    Run(WokwiRunArgs),
-}
-// (WokwiInitArgs, WokwiRunArgs mirror the Python options)
 ```
 
 ## Module-by-Module Migration
@@ -379,7 +275,6 @@ Config path: `dirs::home_dir().unwrap() / ".nff" / "config.json"`
 pub struct Config {
     pub version: String,
     pub default_device: DeviceConfig,
-    pub wokwi: WokwiConfig,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -388,13 +283,6 @@ pub struct DeviceConfig {
     pub board: Option<String>,
     pub fqbn: Option<String>,
     pub baud: u32,   // default 9600
-}
-
-#[derive(Serialize, Deserialize, Default)]
-pub struct WokwiConfig {
-    pub api_token: Option<String>,
-    pub default_timeout_ms: u32,   // default 5000
-    pub diagram_path: Option<String>,
 }
 ```
 
@@ -410,10 +298,6 @@ Public API to implement (mirrors config.py):
 - `save(config: &Config) -> Result<()>`
 - `get_default_device() -> Result<DeviceConfig>`
 - `set_default_device(port, board, fqbn, baud) -> Result<()>`
-- `get_wokwi_config() -> Result<WokwiConfig>`
-- `set_wokwi_token(token: Option<&str>) -> Result<()>`
-- `set_wokwi_diagram_path(path: Option<&str>) -> Result<()>`
-- `set_wokwi_timeout(ms: u32) -> Result<()>`
 - `exists() -> bool`
 
 ### tools/boards.rs (from tools/boards.py)
@@ -422,14 +306,14 @@ Public API to implement (mirrors config.py):
 `SerialPortType::UsbPort(UsbPortInfo { vid: u16, pid: u16, .. })`.
 
 ```rust
-pub const BOARD_MAP: &[(u16, u16, &str, &str, Option<&str>)] = &[
-    (0x2341, 0x0043, "Arduino Uno",       "arduino:avr:uno",         Some("wokwi-arduino-uno")),
-    (0x2341, 0x0010, "Arduino Mega 2560", "arduino:avr:mega",        Some("wokwi-arduino-mega")),
-    (0x2341, 0x0036, "Arduino Leonardo",  "arduino:avr:leonardo",    Some("wokwi-arduino-leonardo")),
-    (0x2341, 0x0058, "Arduino Nano",      "arduino:avr:nano",        Some("wokwi-arduino-nano")),
-    (0x10c4, 0xea60, "ESP32 (CP210x)",    "esp32:esp32:esp32",       Some("wokwi-esp32-devkit-v1")),
-    (0x1a86, 0x7523, "ESP32 (CH340)",     "esp32:esp32:esp32",       Some("wokwi-esp32-devkit-v1")),
-    (0x0403, 0x6001, "ESP8266 (FTDI)",    "esp8266:esp8266:generic", Some("wokwi-esp8266")),
+pub const BOARD_MAP: &[(u16, u16, &str, &str)] = &[
+    (0x2341, 0x0043, "Arduino Uno",       "arduino:avr:uno"),
+    (0x2341, 0x0010, "Arduino Mega 2560", "arduino:avr:mega"),
+    (0x2341, 0x0036, "Arduino Leonardo",  "arduino:avr:leonardo"),
+    (0x2341, 0x0058, "Arduino Nano",      "arduino:avr:nano"),
+    (0x10c4, 0xea60, "ESP32 (CP210x)",    "esp32:esp32:esp32"),
+    (0x1a86, 0x7523, "ESP32 (CH340)",     "esp32:esp32:esp32"),
+    (0x0403, 0x6001, "ESP8266 (FTDI)",    "esp8266:esp8266:generic"),
 ];
 
 pub struct DetectedDevice {
@@ -438,7 +322,6 @@ pub struct DetectedDevice {
     pub fqbn: String,
     pub vendor_id: String,   // 4-char zero-padded hex, lowercase
     pub product_id: String,
-    pub wokwi_chip: Option<String>,
 }
 
 pub fn list_devices() -> Vec<DetectedDevice> { ... }
@@ -502,12 +385,6 @@ pub fn find_arduino_cli() -> Option<PathBuf> {
 
 pub fn find_esptool() -> Option<PathBuf> {
     // which::which("esptool.py") then which::which("esptool")
-}
-
-pub fn find_wokwi_cli() -> Option<PathBuf> {
-    // which::which("wokwi-cli")
-    // Windows fallback: %LOCALAPPDATA%\Programs\wokwi-cli\wokwi-cli.exe
-    // Unix fallback: ~/.local/bin/wokwi-cli
 }
 
 // Sketch management
@@ -609,29 +486,22 @@ Add new tools as `async fn` methods on `NffServer` with `#[tool(description = ".
 1. Resolve FQBN: --board arg → config::get_default_device().fqbn → error
 2. Resolve port: --port arg → boards::find_device() → config default → error
 3. If --manual-reset: print prompt, wait for Enter
-4. If --sim: spawn Python `nff wokwi run --timeout <sim_timeout>` via subprocess
-5. Else:
-   a. toolchain::stream_compile(sketch_dir, fqbn) → print each line (indicatif spinner)
-   b. toolchain::stream_upload(sketch_dir, fqbn, port) → print each line
-   c. Check ProcessStream.returncode; exit non-zero on failure
+4. toolchain::stream_compile(sketch_dir, fqbn) → print each line (indicatif spinner)
+5. toolchain::stream_upload(sketch_dir, fqbn, port) → print each line
+6. Check ProcessStream.returncode; exit non-zero on failure
 ```
 
 ### commands/init.rs (from commands/init.py)
 
 ```
-1. Interactive prompt (stdin): "1) Real board  2) Simulation"
-2. If real board:
-   a. boards::list_devices() — list connected devices
-   b. User picks port (or auto-detect if only one)
-   c. config::set_default_device(port, board, fqbn, baud)
-   d. installer::install(force=false) if arduino-cli not found
-3. If simulation:
-   a. Offer 6 Wokwi board choices (same list as Python)
-   b. config::set_default_device("", board, fqbn, 9600)
-4. Register MCP with Claude Code:
+1. boards::list_devices() — list connected devices
+2. User picks port (or auto-detect if only one)
+3. config::set_default_device(port, board, fqbn, baud)
+4. installer::install(force=false) if arduino-cli not found
+5. Register MCP with Claude Code:
    Command::new("claude").args(["mcp", "add", "--scope", "user",
        "nff", current_exe_path, "mcp"])
-5. Print success summary
+6. Print success summary
 ```
 
 ### commands/monitor.rs (from commands/monitor.py)
@@ -680,7 +550,6 @@ All phases complete. Run `cargo test && cargo clippy -- -D warnings` to verify.
 7. ~~cli.rs + main.rs~~ — clap, all commands wired
 8. ~~commands~~ — `init`, `flash`, `monitor`, `doctor`, `clean`, `install_deps`, `mcp`, `connect`, `ota`
 9. ~~mcp_server.rs~~ — native Rust MCP server via `rmcp` (no Python subprocess)
-10. ~~tools/wokwi.rs~~ — Wokwi simulation tools in Rust
 
 ## Verification
 

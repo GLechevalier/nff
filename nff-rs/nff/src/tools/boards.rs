@@ -1,101 +1,48 @@
 use serialport::available_ports;
 
-pub const BOARD_MAP: &[(u16, u16, &str, &str, Option<&str>)] = &[
-    (
-        0x2341,
-        0x0043,
-        "Arduino Uno",
-        "arduino:avr:uno",
-        Some("wokwi-arduino-uno"),
-    ),
-    (
-        0x2341,
-        0x0010,
-        "Arduino Mega 2560",
-        "arduino:avr:mega",
-        Some("wokwi-arduino-mega"),
-    ),
-    (
-        0x2341,
-        0x0036,
-        "Arduino Leonardo",
-        "arduino:avr:leonardo",
-        Some("wokwi-arduino-leonardo"),
-    ),
-    (
-        0x2341,
-        0x0058,
-        "Arduino Nano",
-        "arduino:avr:nano",
-        Some("wokwi-arduino-nano"),
-    ),
-    (
-        0x10c4,
-        0xea60,
-        "ESP32 (CP210x)",
-        "esp32:esp32:esp32",
-        Some("wokwi-esp32-devkit-v1"),
-    ),
-    (
-        0x1a86,
-        0x7523,
-        "ESP32 (CH340)",
-        "esp32:esp32:esp32",
-        Some("wokwi-esp32-devkit-v1"),
-    ),
-    (
-        0x0403,
-        0x6001,
-        "ESP8266 (FTDI)",
-        "esp8266:esp8266:generic",
-        Some("wokwi-esp8266"),
-    ),
+pub const BOARD_MAP: &[(u16, u16, &str, &str)] = &[
+    (0x2341, 0x0043, "Arduino Uno", "arduino:avr:uno"),
+    (0x2341, 0x0010, "Arduino Mega 2560", "arduino:avr:mega"),
+    (0x2341, 0x0036, "Arduino Leonardo", "arduino:avr:leonardo"),
+    (0x2341, 0x0058, "Arduino Nano", "arduino:avr:nano"),
+    (0x10c4, 0xea60, "ESP32 (CP210x)", "esp32:esp32:esp32"),
+    (0x1a86, 0x7523, "ESP32 (CH340)", "esp32:esp32:esp32"),
+    (0x0403, 0x6001, "ESP8266 (FTDI)", "esp8266:esp8266:generic"),
 ];
 
-/// PlatformIO board catalog: board id → (platform, wokwi chip). Supplies the platform
-/// for the common families; any board id is still accepted (PlatformIO resolves +
-/// installs the platform on first build), which is what makes nff board-universal.
-/// `wokwi_chip` is None where no Wokwi model exists yet (STM32, ESP32-S2).
-pub const PIO_BOARD_CATALOG: &[(&str, &str, Option<&str>)] = &[
+/// PlatformIO board catalog: board id → platform. Supplies the platform for the common
+/// families; any board id is still accepted (PlatformIO resolves + installs the platform
+/// on first build), which is what makes nff board-universal.
+pub const PIO_BOARD_CATALOG: &[(&str, &str)] = &[
     // ESP32 family
-    ("esp32dev", "espressif32", Some("wokwi-esp32-devkit-v1")),
-    ("esp32-s3-devkitc-1", "espressif32", Some("board-esp32-s3-devkitc-1")),
-    ("esp32-c3-devkitm-1", "espressif32", Some("board-esp32-c3-devkitm-1")),
-    ("esp32-c6-devkitc-1", "espressif32", Some("board-esp32-c6-devkitc-1")),
-    ("esp32-s2-saola-1", "espressif32", None),
+    ("esp32dev", "espressif32"),
+    ("esp32-s3-devkitc-1", "espressif32"),
+    ("esp32-c3-devkitm-1", "espressif32"),
+    ("esp32-c6-devkitc-1", "espressif32"),
+    ("esp32-s2-saola-1", "espressif32"),
     // ESP8266
-    ("esp01_1m", "espressif8266", Some("wokwi-esp8266")),
-    ("nodemcuv2", "espressif8266", Some("wokwi-esp8266")),
+    ("esp01_1m", "espressif8266"),
+    ("nodemcuv2", "espressif8266"),
     // RP2040 / Raspberry Pi Pico
-    ("pico", "raspberrypi", Some("wokwi-pi-pico")),
-    ("rpipicow", "raspberrypi", Some("wokwi-pi-pico-w")),
+    ("pico", "raspberrypi"),
+    ("rpipicow", "raspberrypi"),
     // STM32
-    ("genericSTM32F103C8", "ststm32", None),
-    ("nucleo_f401re", "ststm32", None),
-    ("bluepill_f103c8", "ststm32", None),
+    ("genericSTM32F103C8", "ststm32"),
+    ("nucleo_f401re", "ststm32"),
+    ("bluepill_f103c8", "ststm32"),
     // Classic AVR
-    ("uno", "atmelavr", Some("wokwi-arduino-uno")),
-    ("megaatmega2560", "atmelavr", Some("wokwi-arduino-mega")),
-    ("nanoatmega328", "atmelavr", Some("wokwi-arduino-nano")),
-    ("leonardo", "atmelavr", Some("wokwi-arduino-leonardo")),
+    ("uno", "atmelavr"),
+    ("megaatmega2560", "atmelavr"),
+    ("nanoatmega328", "atmelavr"),
+    ("leonardo", "atmelavr"),
 ];
 
 /// Best-effort PlatformIO platform for a board id, or None if unknown.
 pub fn pio_platform_for(board: &str) -> Option<&'static str> {
     PIO_BOARD_CATALOG
         .iter()
-        .find(|(id, _, _)| *id == board)
-        .map(|(_, platform, _)| *platform)
-}
-
-/// Wokwi chip for a PlatformIO board id, or None if unknown / unsupported.
-/// Reserved for the PlatformIO `flash --sim` path (deferred — Wokwi sim parity).
-#[allow(dead_code)]
-pub fn pio_wokwi_chip_for(board: &str) -> Option<&'static str> {
-    PIO_BOARD_CATALOG
-        .iter()
-        .find(|(id, _, _)| *id == board)
-        .and_then(|(_, _, wokwi)| *wokwi)
+        .find(|(id, _)| *id == board)
+        .map(|(_, platform)| *platform)
 }
 
 /// Map an arduino-cli FQBN to a sensible default PlatformIO board id, for `nff init`
@@ -120,7 +67,6 @@ pub struct DetectedDevice {
     pub fqbn: String,
     pub vendor_id: String,
     pub product_id: String,
-    pub wokwi_chip: Option<String>,
 }
 
 pub fn list_devices() -> Vec<DetectedDevice> {
@@ -134,9 +80,8 @@ pub fn list_devices() -> Vec<DetectedDevice> {
         if let serialport::SerialPortType::UsbPort(usb) = &info.port_type {
             let vid = usb.vid;
             let pid = usb.pid;
-            if let Some(&(_, _, name, fqbn, wokwi)) = BOARD_MAP
-                .iter()
-                .find(|&&(v, p, _, _, _)| v == vid && p == pid)
+            if let Some(&(_, _, name, fqbn)) =
+                BOARD_MAP.iter().find(|&&(v, p, _, _)| v == vid && p == pid)
             {
                 devices.push(DetectedDevice {
                     port: info.port_name.clone(),
@@ -144,7 +89,6 @@ pub fn list_devices() -> Vec<DetectedDevice> {
                     fqbn: fqbn.to_string(),
                     vendor_id: format!("{:04x}", vid),
                     product_id: format!("{:04x}", pid),
-                    wokwi_chip: wokwi.map(String::from),
                 });
             }
         }
@@ -165,7 +109,7 @@ mod tests {
     #[test]
     fn board_map_contains_arduino_uno() {
         assert!(
-            BOARD_MAP.iter().any(|&(vid, pid, _, fqbn, _)| {
+            BOARD_MAP.iter().any(|&(vid, pid, _, fqbn)| {
                 vid == 0x2341 && pid == 0x0043 && fqbn == "arduino:avr:uno"
             }),
             "Arduino Uno (2341:0043) missing from BOARD_MAP"
@@ -175,7 +119,7 @@ mod tests {
     #[test]
     fn board_map_contains_esp32_cp210x() {
         assert!(
-            BOARD_MAP.iter().any(|&(vid, pid, _, fqbn, _)| {
+            BOARD_MAP.iter().any(|&(vid, pid, _, fqbn)| {
                 vid == 0x10c4 && pid == 0xea60 && fqbn == "esp32:esp32:esp32"
             }),
             "ESP32 CP210x (10c4:ea60) missing from BOARD_MAP"
@@ -183,18 +127,8 @@ mod tests {
     }
 
     #[test]
-    fn board_map_all_entries_have_wokwi_chip() {
-        for &(vid, pid, name, _, wokwi) in BOARD_MAP {
-            assert!(
-                wokwi.is_some(),
-                "BOARD_MAP entry {name} ({vid:04x}:{pid:04x}) has no wokwi chip"
-            );
-        }
-    }
-
-    #[test]
     fn board_map_vendor_product_ids_nonzero() {
-        for &(vid, pid, name, _, _) in BOARD_MAP {
+        for &(vid, pid, name, _) in BOARD_MAP {
             assert!(vid > 0, "vid == 0 for {name}");
             assert!(pid > 0, "pid == 0 for {name}");
         }
@@ -202,7 +136,7 @@ mod tests {
 
     #[test]
     fn board_map_fqbns_have_two_colons() {
-        for &(_, _, name, fqbn, _) in BOARD_MAP {
+        for &(_, _, name, fqbn) in BOARD_MAP {
             assert_eq!(
                 fqbn.chars().filter(|&c| c == ':').count(),
                 2,
@@ -235,13 +169,5 @@ mod tests {
         assert_eq!(pio_platform_for("esp32dev"), Some("espressif32"));
         assert_eq!(pio_platform_for("pico"), Some("raspberrypi"));
         assert_eq!(pio_platform_for("some_exotic_board"), None);
-    }
-
-    #[test]
-    fn pio_wokwi_chip_lookup() {
-        assert_eq!(pio_wokwi_chip_for("esp32dev"), Some("wokwi-esp32-devkit-v1"));
-        // Catalogued board with no Wokwi model yet.
-        assert_eq!(pio_wokwi_chip_for("esp32-s2-saola-1"), None);
-        assert_eq!(pio_wokwi_chip_for("unknown"), None);
     }
 }

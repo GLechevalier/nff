@@ -1,4 +1,4 @@
-"""Auto-install arduino-cli and wokwi-cli binaries."""
+"""Auto-install the arduino-cli binary."""
 
 import io
 import os
@@ -13,7 +13,6 @@ from typing import Optional
 import requests
 
 _ARDUINO_CLI_BASE = "https://downloads.arduino.cc/arduino-cli/arduino-cli_latest"
-_WOKWI_CLI_BASE = "https://github.com/wokwi/wokwi-cli/releases/latest/download"
 
 
 def _arduino_asset() -> tuple[str, str]:

@@ -18,7 +18,6 @@ pub enum Commands {
     Compile(CompileArgs),
     Flash(FlashArgs),
     Monitor(MonitorArgs),
-    Wokwi(WokwiCommand),
     Doctor,
     Clean,
     Test,
@@ -84,25 +83,13 @@ pub struct FlashArgs {
     #[arg(
         long,
         value_name = "PORT",
-        help = "Serial port, e.g. COM3. Falls back to config. Not needed with --sim."
+        help = "Serial port, e.g. COM3. Falls back to config."
     )]
     pub port: Option<String>,
     #[arg(long, help = "Baud rate (stored in config, not used by arduino-cli).")]
     pub baud: Option<u32>,
     #[arg(long, help = "Pause before upload — use when auto-reset is broken.")]
     pub manual_reset: bool,
-    #[arg(
-        long,
-        help = "Simulate with Wokwi instead of uploading to real hardware."
-    )]
-    pub sim: bool,
-    #[arg(
-        long,
-        default_value = "5000",
-        value_name = "MS",
-        help = "Wokwi simulation timeout in milliseconds. Only used with --sim."
-    )]
-    pub sim_timeout: u32,
 }
 
 #[derive(Args)]
@@ -127,47 +114,6 @@ pub struct MonitorArgs {
 pub struct InstallDepsArgs {
     #[arg(long, help = "Reinstall even if already present.")]
     pub force: bool,
-    #[arg(long, help = "Skip wokwi-cli installation.")]
-    pub skip_wokwi: bool,
-}
-
-#[derive(Args)]
-pub struct WokwiCommand {
-    #[command(subcommand)]
-    pub sub: WokwiSubcommands,
-}
-
-#[derive(Subcommand)]
-pub enum WokwiSubcommands {
-    Init(WokwiInitArgs),
-    Run(WokwiRunArgs),
-}
-
-#[derive(Args)]
-pub struct WokwiInitArgs {
-    #[arg(long, value_name = "FQBN", help = "Board FQBN override.")]
-    pub board: Option<String>,
-    #[arg(long, value_name = "TOKEN", help = "Wokwi CI API token.")]
-    pub token: Option<String>,
-}
-
-#[derive(Args)]
-pub struct WokwiRunArgs {
-    #[arg(long, help = "Open animated circuit in VS Code.")]
-    pub gui: bool,
-    #[arg(
-        long,
-        default_value = "5000",
-        value_name = "MS",
-        help = "Simulation wall-clock timeout in milliseconds."
-    )]
-    pub timeout: u32,
-    #[arg(
-        long,
-        value_name = "FILE",
-        help = "Write captured serial output to this file."
-    )]
-    pub serial_log: Option<PathBuf>,
 }
 
 // ── mcp ─────────────────────────────────────────────────────────────────────

@@ -221,19 +221,6 @@ def find_esptool() -> Optional[str]:
     return shutil.which("esptool.py") or shutil.which("esptool")
 
 
-def find_wokwi_cli() -> Optional[str]:
-    found = shutil.which("wokwi-cli")
-    if found:
-        return found
-    if sys.platform == "win32":
-        import os
-        base = os.environ.get("LOCALAPPDATA", "")
-        candidate = Path(base) / "Programs" / "wokwi-cli" / "wokwi-cli.exe"
-    else:
-        candidate = Path.home() / ".local" / "bin" / "wokwi-cli"
-    return str(candidate) if candidate.exists() else None
-
-
 def _version_of(cmd: list[str]) -> Optional[str]:
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
@@ -256,13 +243,6 @@ def esptool_version() -> Optional[str]:
     if not tool:
         return None
     return _version_of([tool, "version"])
-
-
-def wokwi_cli_version() -> Optional[str]:
-    cli = find_wokwi_cli()
-    if not cli:
-        return None
-    return _version_of([cli, "--version"])
 
 
 def _require_arduino_cli() -> str:
@@ -570,7 +550,7 @@ def compile_only(
 
 
 def compile(code: str, fqbn: str) -> tuple[str, Path]:
-    """Back-compat shim used by the Wokwi tools: (output, elf_path)."""
+    """Compile from raw code, returning (output, elf_path)."""
     result = compile_only(fqbn, code=code)
     elf = result.elf if result.ok else Path("")
     return result.output, elf if elf is not None else Path("")

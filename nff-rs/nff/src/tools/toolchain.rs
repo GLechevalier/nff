@@ -140,55 +140,9 @@ pub fn find_esptool() -> Option<PathBuf> {
     which("esptool.py").or_else(|_| which("esptool")).ok()
 }
 
-pub fn find_wokwi_cli() -> Option<PathBuf> {
-    if let Ok(p) = which("wokwi-cli") {
-        return Some(p);
-    }
-    #[cfg(windows)]
-    {
-        let base = std::env::var("LOCALAPPDATA")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| {
-                dirs::home_dir()
-                    .unwrap_or_default()
-                    .join("AppData")
-                    .join("Local")
-            });
-        let candidate = base
-            .join("Programs")
-            .join("wokwi-cli")
-            .join("wokwi-cli.exe");
-        if candidate.exists() {
-            return Some(candidate);
-        }
-    }
-    #[cfg(not(windows))]
-    {
-        let candidate = dirs::home_dir()?
-            .join(".local")
-            .join("bin")
-            .join("wokwi-cli");
-        if candidate.exists() {
-            return Some(candidate);
-        }
-    }
-    None
-}
-
 pub fn arduino_cli_version() -> Option<String> {
     let exe = find_arduino_cli()?;
     let out = Command::new(&exe).arg("version").output().ok()?;
-    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    if s.is_empty() {
-        None
-    } else {
-        Some(s)
-    }
-}
-
-pub fn wokwi_cli_version() -> Option<String> {
-    let exe = find_wokwi_cli()?;
-    let out = Command::new(&exe).arg("--version").output().ok()?;
     let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
     if s.is_empty() {
         None
@@ -262,6 +216,7 @@ fn require_arduino_cli() -> Result<PathBuf, ToolchainError> {
 /// On cache hits the ELF lives in `%LOCALAPPDATA%/arduino/sketches/<HASH>/`.
 /// We find it by re-running `compile --json` (instant cache hit) and reading
 /// `builder_result.build_path` from the JSON output.
+#[allow(dead_code)]
 pub fn locate_compiled_elf(sketch_dir: &Path, fqbn: &str) -> Result<PathBuf, ToolchainError> {
     let expected = elf_path_for(sketch_dir, fqbn);
     if expected.is_file() {
@@ -1026,11 +981,6 @@ mod tests {
     #[test]
     fn find_arduino_cli_does_not_panic() {
         let _ = find_arduino_cli();
-    }
-
-    #[test]
-    fn find_wokwi_cli_does_not_panic() {
-        let _ = find_wokwi_cli();
     }
 
     #[test]

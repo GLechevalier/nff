@@ -17,10 +17,6 @@
 - [ ] Yes — board: `___`, OS: `___`, port: `___`
 - [ ] No — explain why below
 
-**Tested in Wokwi simulation:**
-- [ ] Yes
-- [ ] Not applicable
-
 <!-- Paste relevant serial output or `nff doctor` output if it helps. -->
 
 ## Checklist

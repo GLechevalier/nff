@@ -11,7 +11,7 @@ This document explains the migration that added **PlatformIO** as nff's build ba
 
 ## Why
 
-The arduino-cli backend effectively limited nff to the few cores we installed (ESP32 + some AVR FQBNs). PlatformIO ships a registry of ~1000 boards and **self-installs the platform toolchain (compiler + framework + uploader) on first build**, so nff becomes truly universal — ESP32 variants (S3/C3/C6/…), RP2040/Pico, STM32, classic AVR, and far beyond — without per-board setup. PlatformIO also uses **esptool** under the hood, so the `.bin`/`.elf` artifacts stay compatible with the rest of the pipeline (OTA, Wokwi, crash diagnosis).
+The arduino-cli backend effectively limited nff to the few cores we installed (ESP32 + some AVR FQBNs). PlatformIO ships a registry of ~1000 boards and **self-installs the platform toolchain (compiler + framework + uploader) on first build**, so nff becomes truly universal — ESP32 variants (S3/C3/C6/…), RP2040/Pico, STM32, classic AVR, and far beyond — without per-board setup. PlatformIO also uses **esptool** under the hood, so the `.bin`/`.elf` artifacts stay compatible with the rest of the pipeline (OTA, crash diagnosis).
 
 ## How backend selection works
 
@@ -59,7 +59,7 @@ Explicitly **not** required on the pio backend: arduino-cli, manual core install
   - **`platformio.ini`** — `[env:nff]` with `platform`/`board`/`framework = arduino`/`monitor_speed`, plus `build_flags = -DNFF_FQBN_TOKEN=<board>` (same token name as the arduino backend, so the firmware heartbeat reports board identity unchanged).
   - **Commands** — `pio run` (compile) and `pio run -t upload --upload-port <port>` (flash), reusing nff's existing retry/stream machinery.
   - **Artifacts** — discovered from `.pio/build/nff/firmware.{elf,bin,…}`, mapped to the same `CompileResult` shape every consumer already expects.
-- **Board catalog** — `nff/nff/tools/boards.py` gained `PIO_BOARD_CATALOG` (platform + Wokwi chip per board id) and `pio_board` hints on the USB-detect map. The catalog is for defaults/auto-detect, **not** an allow-list — any board id is accepted.
+- **Board catalog** — `nff/nff/tools/boards.py` gained `PIO_BOARD_CATALOG` (platform per board id) and `pio_board` hints on the USB-detect map. The catalog is for defaults/auto-detect, **not** an allow-list — any board id is accepted.
 
 ## Sketch layout difference
 
@@ -84,4 +84,4 @@ A `.cpp` loses the Arduino `.ino` auto-prototype generation, so define functions
 ## Files touched
 
 - New: `nff/nff/tools/backends/{__init__.py, platformio.py}`, `tests/test_platformio.py`, this doc.
-- Changed: `nff/nff/tools/toolchain.py` (dispatch + selection), `config.py` (`build` section, default `platformio`), `tools/boards.py` (catalog + hints), `tools/wokwi.py`, `tools/arduino_lib.py` (dest-parameterised SDK flatten), and the consumers `commands/{init,doctor,install_deps,compile_cmd,flash}.py` + `mcp_server.py`.
+- Changed: `nff/nff/tools/toolchain.py` (dispatch + selection), `config.py` (`build` section, default `platformio`), `tools/boards.py` (catalog + hints), `tools/arduino_lib.py` (dest-parameterised SDK flatten), and the consumers `commands/{init,doctor,install_deps,compile_cmd,flash}.py` + `mcp_server.py`.

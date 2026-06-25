@@ -7,7 +7,6 @@
 //! and refuses `/mcp` without a valid token.
 //!
 //! Per-tool behaviour is covered by unit tests in `src/` (run with `cargo test --bin nff`):
-//! every board's Wokwi diagram + the unsupported-board error live in `tools::wokwi::tests`,
 //! device listing in `tools::boards::tests`, and each tool's parameter parsing in
 //! `mcp_server::tests`. The tool set itself is wired structurally by the `#[tool_router]`
 //! macro, so there is nothing left for a stdio "tools/list" round-trip to add.

@@ -1,4 +1,4 @@
-"""nff install-deps — install the active build backend's toolchain (and wokwi-cli)."""
+"""nff install-deps — install the active build backend's toolchain."""
 
 import click
 from rich.console import Console
@@ -10,8 +10,7 @@ console = Console()
 
 @click.command("install-deps")
 @click.option("--force", is_flag=True, help="Re-install even if already present")
-@click.option("--skip-wokwi", is_flag=True, help="Skip wokwi-cli installation")
-def install_deps(force, skip_wokwi):
+def install_deps(force):
     """Install the build toolchain nff needs (arduino-cli or PlatformIO, per the
     configured backend)."""
     if toolchain.active_backend() == "platformio":

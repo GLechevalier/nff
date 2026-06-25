@@ -19,7 +19,6 @@ pub enum ConfigError {
 pub struct Config {
     pub version: String,
     pub default_device: DeviceConfig,
-    pub wokwi: WokwiConfig,
     #[serde(default)]
     pub diagnosis: DiagnosisConfig,
     #[serde(default)]
@@ -52,18 +51,6 @@ impl Default for DeviceConfig {
 
 fn default_baud() -> u32 {
     9600
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct WokwiConfig {
-    pub api_token: Option<String>,
-    #[serde(default = "default_timeout_ms")]
-    pub default_timeout_ms: u32,
-    pub diagram_path: Option<String>,
-}
-
-fn default_timeout_ms() -> u32 {
-    5000
 }
 
 fn default_server_url() -> String {
@@ -132,16 +119,6 @@ impl Default for AgentConfig {
     }
 }
 
-impl Default for WokwiConfig {
-    fn default() -> Self {
-        WokwiConfig {
-            api_token: None,
-            default_timeout_ms: 5000,
-            diagram_path: None,
-        }
-    }
-}
-
 fn default_backend() -> String {
     "platformio".into()
 }
@@ -171,7 +148,6 @@ impl Default for Config {
         Config {
             version: "1".into(),
             default_device: DeviceConfig::default(),
-            wokwi: WokwiConfig::default(),
             diagnosis: DiagnosisConfig::default(),
             mcp: McpConfig::default(),
             agent: AgentConfig::default(),
@@ -248,30 +224,6 @@ pub fn set_default_device(
         },
         baud,
     };
-    save(&config)
-}
-
-pub fn get_wokwi_config() -> Result<WokwiConfig, ConfigError> {
-    Ok(load()?.wokwi)
-}
-
-pub fn set_wokwi_token(token: Option<&str>) -> Result<(), ConfigError> {
-    let mut config = load()?;
-    config.wokwi.api_token = token.map(String::from);
-    save(&config)
-}
-
-#[allow(dead_code)]
-pub fn set_wokwi_diagram_path(path: Option<&str>) -> Result<(), ConfigError> {
-    let mut config = load()?;
-    config.wokwi.diagram_path = path.map(String::from);
-    save(&config)
-}
-
-#[allow(dead_code)]
-pub fn set_wokwi_timeout(ms: u32) -> Result<(), ConfigError> {
-    let mut config = load()?;
-    config.wokwi.default_timeout_ms = ms;
     save(&config)
 }
 
@@ -370,7 +322,6 @@ mod tests {
         let parsed: Config = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.version, "1");
         assert_eq!(parsed.default_device.baud, 9600);
-        assert_eq!(parsed.wokwi.default_timeout_ms, 5000);
     }
 
     #[test]
@@ -384,8 +335,7 @@ mod tests {
         // A config.json written before the build section existed must still parse.
         let legacy = r#"{
             "version": "1",
-            "default_device": {"port": null, "board": null, "fqbn": null, "baud": 9600},
-            "wokwi": {"api_token": null, "default_timeout_ms": 5000, "diagram_path": null}
+            "default_device": {"port": null, "board": null, "fqbn": null, "baud": 9600}
         }"#;
         let parsed: Config = serde_json::from_str(legacy).unwrap();
         assert_eq!(parsed.build.backend, "platformio");

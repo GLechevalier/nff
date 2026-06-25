@@ -4,7 +4,7 @@ mod mcp_server;
 mod tools;
 
 use clap::Parser;
-use cli::{AuthSubcommands, Cli, Commands, PiSubcommands, ProvisionSubcommands, WokwiSubcommands};
+use cli::{AuthSubcommands, Cli, Commands, PiSubcommands, ProvisionSubcommands};
 
 fn main() {
     let cli = Cli::parse();
@@ -28,10 +28,6 @@ fn main() {
         Commands::Mcp(args) => tokio::runtime::Runtime::new()
             .expect("failed to create tokio runtime")
             .block_on(commands::mcp::run(&args)),
-        Commands::Wokwi(w) => match w.sub {
-            WokwiSubcommands::Init(a) => commands::wokwi::run_init(&a),
-            WokwiSubcommands::Run(a) => commands::wokwi::run_run(&a),
-        },
         Commands::Auth(a) => match a.sub {
             AuthSubcommands::Login(args) => commands::auth::run_login(&args),
             AuthSubcommands::Logout(args) => commands::auth::run_logout(&args),

@@ -25,23 +25,6 @@ def _esp32(port="COM10"):
 
 
 # ---------------------------------------------------------------------------
-# init command — simulation path
-# ---------------------------------------------------------------------------
-
-def test_init_sim_path_writes_config(isolated_config):
-    from nff import config as cfg
-    with patch("nff.commands.init._require_login"), \
-         patch("nff.commands.init.daemon.start_background", return_value=True), \
-         patch("nff.commands.init._register_mcp") as mreg:
-        result = CliRunner().invoke(init, input="2\n5\n")  # sim, board #5 (ESP32)
-    assert result.exit_code == 0, result.output
-    assert "nff configured" in result.output
-    dev = cfg.get_default_device()
-    assert dev["fqbn"] == "esp32:esp32:esp32"
-    mreg.assert_called_once()
-
-
-# ---------------------------------------------------------------------------
 # init command — real board path
 # ---------------------------------------------------------------------------
 
@@ -53,8 +36,8 @@ def test_init_real_board_single_device_decline_onboarding(isolated_config):
          patch("nff.commands.init.toolchain.find_arduino_cli", return_value="/bin/arduino-cli"), \
          patch("nff.commands.init._onboard_platform") as monboard, \
          patch("nff.commands.init._register_mcp"):
-        # mode=1, decline "Connect to platform now?"
-        result = CliRunner().invoke(init, input="1\nn\n")
+        # decline "Connect to platform now?"
+        result = CliRunner().invoke(init, input="n\n")
     assert result.exit_code == 0, result.output
     dev = cfg.get_default_device()
     assert dev["port"] == "COM10"
@@ -70,8 +53,8 @@ def test_init_real_board_multi_device_select_and_onboard(isolated_config):
          patch("nff.commands.init.toolchain.find_arduino_cli", return_value="/bin/arduino-cli"), \
          patch("nff.commands.init._onboard_platform") as monboard, \
          patch("nff.commands.init._register_mcp"):
-        # mode=1, select board #2, accept onboarding
-        result = CliRunner().invoke(init, input="1\n2\ny\n")
+        # select board #2, accept onboarding
+        result = CliRunner().invoke(init, input="2\ny\n")
     assert result.exit_code == 0, result.output
     monboard.assert_called_once()
     selected = monboard.call_args[0][0]
@@ -116,8 +99,11 @@ def test_require_login_aborts_when_login_fails():
 def test_init_starts_background_server(isolated_config):
     with patch("nff.commands.init._require_login"), \
          patch("nff.commands.init._register_mcp"), \
+         patch("nff.commands.init.boards_module.list_devices", return_value=[_esp32()]), \
+         patch("nff.commands.init.toolchain.find_arduino_cli", return_value="/bin/arduino-cli"), \
+         patch("nff.commands.init._onboard_platform"), \
          patch("nff.commands.init.daemon.start_background", return_value=True) as mstart:
-        result = CliRunner().invoke(init, input="2\n5\n")  # sim path
+        result = CliRunner().invoke(init, input="n\n")  # real board, decline onboarding
     assert result.exit_code == 0, result.output
     mstart.assert_called_once()
 

@@ -20,9 +20,7 @@ import nff.tools.arduino_lib as arduino_lib
 import nff.tools.boards as boards_module
 import nff.tools.serial as serial_module
 import nff.tools.toolchain as toolchain
-import nff.tools.wokwi as wokwi_module
 from nff import config
-from nff.tools.wokwi import WokwiError
 
 # ---------------------------------------------------------------------------
 # Resolver helpers (tested directly)
@@ -61,7 +59,6 @@ async def list_devices() -> dict:
                 "fqbn": d.fqbn,
                 "vendor_id": d.vendor_id,
                 "product_id": d.product_id,
-                "wokwi_chip": d.wokwi_chip,
             }
             for d in devices
         ]
@@ -164,7 +161,6 @@ async def get_device_info(port: Optional[str] = None) -> dict:
             "baud": baud,
             "vendor_id": device.vendor_id,
             "product_id": device.product_id,
-            "wokwi_chip": device.wokwi_chip,
         }
     cfg = config.get_default_device()
     return {
@@ -174,83 +170,7 @@ async def get_device_info(port: Optional[str] = None) -> dict:
         "baud": baud,
         "vendor_id": "",
         "product_id": "",
-        "wokwi_chip": None,
     }
-
-
-async def wokwi_flash(
-    code: str,
-    board: Optional[str] = None,
-    timeout_ms: int = 5000,
-) -> dict:
-    fqbn = board or toolchain.configured_board()
-    if not fqbn:
-        return {"serial_output": "", "compile_output": "ERROR: Missing board",
-                "exit_code": 1, "simulated": True}
-    try:
-        compile_output, elf_path = toolchain.compile(code, fqbn)
-    except Exception as exc:
-        return {"serial_output": "", "compile_output": f"compile error: {exc}",
-                "exit_code": 1, "simulated": True}
-    runner = wokwi_module.WokwiRunner()
-    try:
-        from pathlib import Path
-        from nff.tools import toolchain as tc
-        sd = Path(tc._SKETCH_DIR)
-        sd.mkdir(parents=True, exist_ok=True)
-        diagram = wokwi_module.generate_diagram(fqbn)
-        (sd / "diagram.json").write_text(json.dumps(diagram, indent=2), encoding="utf-8")
-        wokwi_module.write_wokwi_toml(sd, elf_path)
-        result = runner.run(sd, timeout_ms=timeout_ms, elf=elf_path)
-    except WokwiError as exc:
-        return {"serial_output": "", "compile_output": compile_output,
-                "exit_code": 1, "simulated": True, "wokwi_error": str(exc)}
-    except Exception as exc:
-        return {"serial_output": "", "compile_output": compile_output,
-                "exit_code": 1, "simulated": True, "error": str(exc)}
-    return {
-        "serial_output": result.serial_output,
-        "compile_output": compile_output,
-        "exit_code": result.exit_code,
-        "simulated": True,
-    }
-
-
-async def wokwi_serial_read(
-    code: str,
-    board: Optional[str] = None,
-    duration_ms: int = 3000,
-) -> str:
-    fqbn = board or toolchain.configured_board()
-    if not fqbn:
-        return "ERROR: Missing board"
-    try:
-        compile_output, elf_path = toolchain.compile(code, fqbn)
-    except Exception as exc:
-        return f"ERROR: compile failed: {exc}"
-    runner = wokwi_module.WokwiRunner()
-    try:
-        from pathlib import Path
-        from nff.tools import toolchain as tc
-        sd = Path(tc._SKETCH_DIR)
-        sd.mkdir(parents=True, exist_ok=True)
-        diagram = wokwi_module.generate_diagram(fqbn)
-        (sd / "diagram.json").write_text(json.dumps(diagram, indent=2), encoding="utf-8")
-        wokwi_module.write_wokwi_toml(sd, elf_path)
-        result = runner.run(sd, timeout_ms=duration_ms, elf=elf_path)
-    except WokwiError as exc:
-        return f"ERROR: {exc}"
-    except Exception as exc:
-        return f"ERROR: {exc}"
-    return result.serial_output
-
-
-async def wokwi_get_diagram(board: str) -> str:
-    try:
-        diagram = wokwi_module.generate_diagram(board)
-        return json.dumps(diagram, indent=2)
-    except WokwiError as exc:
-        return f"ERROR: {exc}"
 
 
 async def authenticate(
@@ -498,19 +418,6 @@ _TOOLS = [
          inputSchema={"type": "object", "properties": {"port": {"type": "string"}}}),
     Tool(name="get_device_info", description="Return detailed information about the connected device as JSON",
          inputSchema={"type": "object", "properties": {"port": {"type": "string"}}}),
-    Tool(name="wokwi_flash", description="Compile a sketch and run it in the Wokwi simulator",
-         inputSchema={"type": "object", "properties": {
-             "code": {"type": "string"}, "board": {"type": "string"},
-             "timeout_ms": {"type": "integer", "default": 5000}},
-             "required": ["code"]}),
-    Tool(name="wokwi_serial_read", description="Compile and simulate a sketch, returning only the serial output",
-         inputSchema={"type": "object", "properties": {
-             "code": {"type": "string"}, "board": {"type": "string"},
-             "duration_ms": {"type": "integer", "default": 3000}},
-             "required": ["code"]}),
-    Tool(name="wokwi_get_diagram", description="Return a minimal diagram.json for the given board (FQBN or PlatformIO board id)",
-         inputSchema={"type": "object", "properties": {"board": {"type": "string"}},
-                      "required": ["board"]}),
     Tool(name="authenticate",
          description="Log in to the nff diagnosis server. Provide email+password for direct "
                      "login. Omit both to open the browser login page and get a URL — then "
@@ -553,9 +460,6 @@ _DISPATCH = {
     "serial_write": serial_write,
     "reset_device": reset_device,
     "get_device_info": get_device_info,
-    "wokwi_flash": wokwi_flash,
-    "wokwi_serial_read": wokwi_serial_read,
-    "wokwi_get_diagram": wokwi_get_diagram,
     "authenticate": authenticate,
     "complete_authentication": complete_authentication,
     "auth_logout": auth_logout,

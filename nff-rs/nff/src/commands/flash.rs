@@ -1,5 +1,5 @@
 use crate::cli::FlashArgs;
-use crate::tools::{arduino_lib, config, toolchain, wokwi};
+use crate::tools::{arduino_lib, config, toolchain};
 use anyhow::{bail, Result};
 use std::io::{self, BufRead};
 use std::path::Path;
@@ -28,7 +28,7 @@ pub fn run(args: &FlashArgs) -> Result<()> {
         .or_else(|| device_cfg.port.clone().filter(|p| !p.is_empty()))
         .unwrap_or_default();
 
-    if port.is_empty() && !args.sim {
+    if port.is_empty() {
         bail!("Missing port (use --port or run nff init)");
     }
 
@@ -39,22 +39,6 @@ pub fn run(args: &FlashArgs) -> Result<()> {
     } else {
         resolve_sketch(file)?
     };
-
-    if args.sim {
-        if toolchain::pio_active() {
-            bail!(
-                "`flash --sim` is not yet supported on the PlatformIO backend; \
-                 set NFF_BUILD_BACKEND=arduino to simulate"
-            );
-        }
-        println!(
-            "  {}  →  {}  [sim]",
-            sketch_dir.file_name().unwrap_or_default().to_string_lossy(),
-            fqbn
-        );
-        run_simulation(&sketch_dir, &fqbn, args.sim_timeout)?;
-        return Ok(());
-    }
 
     println!(
         "  {}  →  {} on {}",
@@ -144,49 +128,4 @@ fn resolve_sketch(path: &Path) -> Result<std::path::PathBuf> {
     );
     let code = std::fs::read_to_string(path)?;
     toolchain::write_sketch(&code, None).map_err(|e| anyhow::anyhow!("{e}"))
-}
-
-fn run_simulation(sketch_dir: &Path, fqbn: &str, timeout_ms: u32) -> Result<()> {
-    println!("  Compiling…");
-    let mut emit = |line: &str| {
-        if !line.trim().is_empty() {
-            println!("    {line}");
-        }
-    };
-    let rc = toolchain::stream_with_retry(
-        || toolchain::stream_compile(sketch_dir, fqbn),
-        &mut emit,
-        toolchain::COMPILE_BACKOFF,
-        None,
-    );
-    if rc != 0 {
-        bail!("Compile failed (exit {rc})");
-    }
-    println!("  ✓ Compile complete");
-
-    let elf_path =
-        toolchain::locate_compiled_elf(sketch_dir, fqbn).map_err(|e| anyhow::anyhow!("{e}"))?;
-
-    let diagram = wokwi::generate_diagram(fqbn).map_err(|e| anyhow::anyhow!("{e}"))?;
-    std::fs::write(
-        sketch_dir.join("diagram.json"),
-        serde_json::to_string_pretty(&diagram)?,
-    )?;
-    wokwi::write_wokwi_toml(sketch_dir, &elf_path).map_err(|e| anyhow::anyhow!("{e}"))?;
-
-    println!("  Simulating…  (timeout: {timeout_ms} ms)");
-    let result = wokwi::run_simulation(sketch_dir, timeout_ms, Some(&elf_path))
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
-
-    for line in result.serial_output.lines() {
-        println!("    {line}");
-    }
-
-    if result.exit_code == 0 {
-        println!("  ✓ Simulation complete");
-    } else {
-        bail!("Simulation exited with code {}", result.exit_code);
-    }
-
-    Ok(())
 }

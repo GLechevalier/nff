@@ -106,13 +106,9 @@ Each failure class produces a different panic format, exception code, backtrace 
 | `reset_device(port?)` | Toggle DTR to hardware-reset the board |
 | `get_device_info(port?)` | Return port, board name, FQBN, baud rate |
 
-### Simulation — Wokwi (CI without a bench)
-
-| Tool | What it does |
-|---|---|
-| `wokwi_flash(code, board?, timeout_ms?)` | Compile and simulate a sketch via Wokwi |
-| `wokwi_serial_read(code, board?, duration_ms?)` | Compile, simulate, return serial output |
-| `wokwi_get_diagram(board)` | Return a minimal `diagram.json` stub to extend |
+> **Simulation** (running firmware without hardware via Wokwi) lives in the separate
+> **[nff-sim](../nff-sim)** package, which provides the `wokwi_flash` / `wokwi_serial_read` /
+> `wokwi_get_diagram` tools and the `nff-sim` CLI.
 
 ### Field — diagnosis & auth
 
@@ -136,10 +132,6 @@ All bench tools fall back to the default device in `~/.nff/config.json` when `po
 ### Real Hardware
 
 [![Real Hardware Programming](https://img.youtube.com/vi/JoCwczeRfuQ/maxresdefault.jpg)](https://youtu.be/JoCwczeRfuQ)
-
-### Wokwi Simulation
-
-[![Wokwi Simulation](https://img.youtube.com/vi/FZ70lQ-VP3g/maxresdefault.jpg)](https://youtu.be/FZ70lQ-VP3g)
 
 ---
 
@@ -253,16 +245,8 @@ Useful flags:
 | `--window MS` | 2000 | Log window passed to Claude per analysis cycle |
 | `--max-cycles N` | unlimited | Stop after N repair attempts |
 
-### Wokwi simulation (CI without a bench)
-
-| Command | Description |
-|---|---|
-| `nff wokwi init` | Scaffold `wokwi.toml` + `diagram.json` in current directory |
-| `nff flash --sim <path>` | Compile sketch and run headless Wokwi simulation |
-| `nff wokwi run` | Run simulation, stream serial output to terminal |
-| `nff wokwi run --gui` | Open `diagram.json` in VS Code and auto-start visual simulation |
-| `nff wokwi run --serial-log FILE` | Save serial output to file |
-| `nff wokwi run --timeout MS` | Set simulation timeout (default 5000 ms) |
+> **Simulation** (`nff wokwi` / `flash --sim`) moved to the separate
+> **[nff-sim](../nff-sim)** package — see its README.
 
 ---
 
@@ -306,15 +290,15 @@ The PlatformIO backend gives nff every PlatformIO **development platform** — e
 
 ### Curated families (built-in catalog)
 
-These are the board ids in nff's built-in catalog. The catalog only supplies sensible defaults (PlatformIO platform + Wokwi sim chip) so you can name a short board id and `nff init` can auto-detect — **every other board above still builds**, you just pass the full PlatformIO id.
+These are the board ids in nff's built-in catalog. The catalog only supplies sensible defaults (PlatformIO platform) so you can name a short board id and `nff init` can auto-detect — **every other board above still builds**, you just pass the full PlatformIO id.
 
-| Family | PlatformIO platform | Catalogued `--board` ids | Wokwi sim |
-|---|---|---|---|
-| **ESP32** | `espressif32` | `esp32dev`, `esp32-s3-devkitc-1`, `esp32-c3-devkitm-1`, `esp32-c6-devkitc-1`, `esp32-s2-saola-1` | ✅ (S2: ❌) |
-| **ESP8266** | `espressif8266` | `esp01_1m`, `nodemcuv2` | ✅ |
-| **RP2040 / Pico** | `raspberrypi` | `pico`, `rpipicow` | ✅ |
-| **STM32** | `ststm32` | `genericSTM32F103C8`, `bluepill_f103c8`, `nucleo_f401re` | ❌ |
-| **Classic AVR** | `atmelavr` | `uno`, `megaatmega2560`, `nanoatmega328`, `leonardo` | ✅ |
+| Family | PlatformIO platform | Catalogued `--board` ids |
+|---|---|---|
+| **ESP32** | `espressif32` | `esp32dev`, `esp32-s3-devkitc-1`, `esp32-c3-devkitm-1`, `esp32-c6-devkitc-1`, `esp32-s2-saola-1` |
+| **ESP8266** | `espressif8266` | `esp01_1m`, `nodemcuv2` |
+| **RP2040 / Pico** | `raspberrypi` | `pico`, `rpipicow` |
+| **STM32** | `ststm32` | `genericSTM32F103C8`, `bluepill_f103c8`, `nucleo_f401re` |
+| **Classic AVR** | `atmelavr` | `uno`, `megaatmega2560`, `nanoatmega328`, `leonardo` |
 
 Need a board that isn't catalogued (Teensy, SAMD, nRF52, Uno R4, ESP32-P4, …)? Just give its PlatformIO id — e.g. `nff compile sketch.ino --board teensy41`. Adding it to the catalog (for auto-detect + a short default) is a [two-line PR](CONTRIBUTING.md#adding-a-new-board).
 
@@ -352,16 +336,11 @@ When you plug a board in, nff resolves it by USB vendor/product ID to a default 
   "build": {
     "backend": "platformio",
     "board": "esp32dev"
-  },
-  "wokwi": {
-    "api_token": "YOUR_TOKEN",
-    "default_timeout_ms": 5000,
-    "diagram_path": null
   }
 }
 ```
 
-`build.backend` selects the toolchain (`platformio` default, or `arduino`) and `build.board` holds the PlatformIO board id; the arduino backend uses `default_device.fqbn` instead. The `NFF_BUILD_BACKEND` env var overrides `build.backend` per-run. The Wokwi token can also be set via `WOKWI_CLI_TOKEN` (takes precedence over config).
+`build.backend` selects the toolchain (`platformio` default, or `arduino`) and `build.board` holds the PlatformIO board id; the arduino backend uses `default_device.fqbn` instead. The `NFF_BUILD_BACKEND` env var overrides `build.backend` per-run.
 
 ---
 
@@ -371,15 +350,15 @@ nff ships Claude Code skills bundled inside the package:
 
 | Skill | When to use |
 |---|---|
-| `/nff` | Full pipeline reference — hardware and simulation workflows, sketch-first rules, debugging checklist |
-| `/wokwi-diagram` | `diagram.json` authoring reference — component types, pin names, wiring patterns |
+| `/nff` | Full pipeline reference — hardware workflows, sketch-first rules, debugging checklist |
 
 ```
 /nff
-/wokwi-diagram
 ```
 
 Skill files live at `nff/skills/` (the source of truth — edit them there) so they ship with every `pip install nff`, and are also mirrored in `.claude/commands/` for project-level use. Copy them into `~/.claude/commands/` to make the slash commands available globally.
+
+> The `/wokwi-diagram` simulation skill moved to the **[nff-sim](../nff-sim)** package.
 
 ---
 
@@ -404,8 +383,7 @@ nff/
 │   │   ├── doctor.py
 │   │   ├── clean.py
 │   │   ├── install_deps.py
-│   │   ├── mcp_cmd.py
-│   │   └── wokwi_cmd.py
+│   │   └── mcp_cmd.py
 │   ├── tools/
 │   │   ├── boards.py            # USB ID detection + PlatformIO board catalog
 │   │   ├── serial.py            # serial read/write/stream/reset
@@ -413,19 +391,15 @@ nff/
 │   │   ├── backends/
 │   │   │   └── platformio.py    # PlatformIO backend (project scaffold, pio run)
 │   │   ├── installer.py         # arduino-cli auto-install
-│   │   ├── auth.py              # diagnosis-server token handling
-│   │   └── wokwi.py             # Wokwi runner + diagram generation
-│   └── skills/                  # /nff + /wokwi-diagram skills (ship with the package)
+│   │   └── auth.py              # diagnosis-server token handling
+│   └── skills/                  # /nff skill (ships with the package)
 ├── nff-rs/                      # Rust port — the shipped binary (full parity)
 ├── sketches/
 │   ├── blink_esp32/
 │   └── servo_button/
-├── diagram.json                 # Wokwi circuit schematic
-├── wokwi.toml
 └── .claude/
     └── commands/
-        ├── nff.md               # /nff Claude Code skill
-        └── wokwi-diagram.md     # /wokwi-diagram Claude Code skill
+        └── nff.md               # /nff Claude Code skill
 ```
 
 The Rust crate under `nff-rs/nff/` is the **shipped binary** and is at full feature parity with the Python package — every CLI command and MCP tool runs natively (no Python runtime). Build it with `cargo build --release` (binary at `nff-rs/target/release/nff`). The Python package under `nff/nff/` is the reference/prototyping implementation and is kept in sync version-for-version; when you add a feature, land it in both so the two never drift.
@@ -443,69 +417,12 @@ sudo usermod -aG dialout $USER
 
 ---
 
-## Wokwi Simulation
+## Simulation
 
-Get a free CI token at https://wokwi.com/dashboard/ci, then:
-
-```bash
-nff wokwi init --board esp32dev --token YOUR_TOKEN
-nff flash --sim sketches/my_sketch --board esp32dev
-nff wokwi run              # headless
-nff wokwi run --gui        # visual simulation in VS Code
-```
-
-(Use the arduino FQBN form — `--board esp32:esp32:esp32` — when running under `NFF_BUILD_BACKEND=arduino`.)
-
-Install the [Wokwi VS Code extension](https://marketplace.visualstudio.com/items?itemName=wokwi.wokwi-vscode) for the animated circuit view.
-
-### Wokwi MCP Tools
-
-| Tool | What it does |
-|---|---|
-| `wokwi_flash(code, board?, timeout_ms?)` | Compile and simulate a sketch via Wokwi |
-| `wokwi_serial_read(code, board?, duration_ms?)` | Compile, simulate, return serial output |
-| `wokwi_get_diagram(board)` | Return a minimal `diagram.json` stub to extend |
-
-### diagram.json — Circuit Schematic
-
-Always include the serial monitor wires:
-
-```json
-["esp:TX0", "$serialMonitor:RX", "", []],
-["esp:RX0", "$serialMonitor:TX", "", []]
-```
-
-Common components:
-
-```json
-{ "type": "wokwi-led",        "id": "led1", "attrs": { "color": "red" } }
-{ "type": "wokwi-pushbutton", "id": "btn1", "attrs": { "color": "blue" } }
-{ "type": "wokwi-servo",      "id": "srv1", "attrs": { "minAngle": "-90", "maxAngle": "90" } }
-{ "type": "wokwi-resistor",   "id": "r1",   "attrs": { "value": "220" } }
-```
-
-ESP32 DevKit V1 pins: `esp:D<gpio>` · `esp:GND.1` · `esp:GND.2` · `esp:3V3` · `esp:VIN` · `esp:TX0` · `esp:RX0`
-
-Pushbutton wiring: GPIO side → `btn1:1.l`, GND side → `btn1:2.l`. Use `INPUT_PULLUP` in the sketch.
-
-### ESP32 Servo — No Library Required
-
-Use the built-in LEDC peripheral instead of `ESP32Servo`. Wokwi maps its full servo range to 500 µs – 2500 µs pulses.
-
-With 50 Hz / 16-bit resolution (period = 20 000 µs):
-
-| Angle | Pulse | Duty |
-|---|---|---|
-| −90° (min) | 500 µs | 1638 |
-| 0° (center) | 1500 µs | 4915 |
-| +90° (max) | 2500 µs | 8192 |
-
-```cpp
-ledcAttach(SERVO_PIN, 50, 16);
-ledcWrite(SERVO_PIN, 4915);
-```
-
-Set `"minAngle": "-90", "maxAngle": "90"` in `diagram.json` for correct visual mapping.
+Running firmware without hardware (Wokwi) is provided by the separate
+**[nff-sim](../nff-sim)** package. It compiles via `nff` and runs the result in the Wokwi
+simulator — `nff-sim init` / `nff-sim flash` / `nff-sim run`, plus the `wokwi_*` MCP tools
+and the `/wokwi-diagram` authoring skill.
 
 ---
 

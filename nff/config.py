@@ -13,7 +13,6 @@ CONFIG_PATH = CONFIG_DIR / "config.json"
 _DEFAULT = {
     "version": "1",
     "default_device": {"port": None, "board": None, "fqbn": None, "baud": 9600},
-    "wokwi": {"api_token": None, "default_timeout_ms": 5000, "diagram_path": None},
     "diagnosis": {"server_url": "https://nanoforgeflow.com", "frontend_url": "https://nanoforgeflow.com", "access_token": None, "refresh_token": None},
     # Opaque tokens the local MCP OAuth proxy issues to Claude Code. Decoupled from
     # the diagnosis (Supabase) JWT so the MCP session does not expire with it.
@@ -81,34 +80,6 @@ def set_default_device(port, board, fqbn, baud: int = 9600) -> None:
     data["default_device"]["fqbn"] = fqbn
     data["default_device"]["baud"] = baud
     data.setdefault("version", "1")
-    save(data)
-
-
-def get_wokwi_config() -> dict:
-    try:
-        return load().get("wokwi", copy.deepcopy(_DEFAULT["wokwi"]))
-    except ConfigError:
-        return copy.deepcopy(_DEFAULT["wokwi"])
-
-
-def set_wokwi_token(token) -> None:
-    data = load() if exists() else copy.deepcopy(_DEFAULT)
-    data.setdefault("wokwi", copy.deepcopy(_DEFAULT["wokwi"]))
-    data["wokwi"]["api_token"] = token
-    save(data)
-
-
-def set_wokwi_diagram_path(path) -> None:
-    data = load() if exists() else copy.deepcopy(_DEFAULT)
-    data.setdefault("wokwi", copy.deepcopy(_DEFAULT["wokwi"]))
-    data["wokwi"]["diagram_path"] = path
-    save(data)
-
-
-def set_wokwi_timeout(ms: int) -> None:
-    data = load() if exists() else copy.deepcopy(_DEFAULT)
-    data.setdefault("wokwi", copy.deepcopy(_DEFAULT["wokwi"]))
-    data["wokwi"]["default_timeout_ms"] = ms
     save(data)
 
 

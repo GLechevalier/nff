@@ -17,24 +17,6 @@ from nff.tools import (
     toolchain,
 )
 
-_SIM_BOARDS = [
-    ("Arduino Uno",       "arduino:avr:uno"),
-    ("Arduino Mega 2560", "arduino:avr:mega"),
-    ("Arduino Nano",      "arduino:avr:nano"),
-    ("Arduino Leonardo",  "arduino:avr:leonardo"),
-    ("ESP32",             "esp32:esp32:esp32"),
-    ("ESP8266",           "esp8266:esp8266:generic"),
-]
-
-# PlatformIO board ids offered in the simulation picker when the pio backend is active.
-_SIM_BOARDS_PIO = [
-    ("ESP32",             "esp32dev"),
-    ("ESP32-S3",          "esp32-s3-devkitc-1"),
-    ("ESP32-C3",          "esp32-c3-devkitm-1"),
-    ("Raspberry Pi Pico", "pico"),
-    ("Arduino Uno",       "uno"),
-]
-
 # The bootstrap firmware runs Serial at 115200; keep the saved baud in sync so
 # `nff monitor` (and onboarding's own serial watch) match the device.
 _BOOTSTRAP_BAUD = 115200
@@ -216,78 +198,60 @@ def init(port, baud, force, backend):
 
     if is_pio:
         click.echo("Build backend: PlatformIO (board-universal)\n")
-    click.echo("  1) Real board (USB)")
-    click.echo("  2) Wokwi simulation")
-    choice = click.prompt("Select mode", type=click.Choice(["1", "2"]))
 
-    if choice == "1":
-        click.pause("\nPlug your board into a USB port, then press any key…")
-        devices = boards_module.list_devices()
-        if devices:
-            click.echo("\nDetected boards:")
-            for i, d in enumerate(devices, 1):
-                click.echo(f"  {i}) {d.board} on {d.port}")
-            if len(devices) == 1:
-                selected = devices[0]
-            else:
-                idx = click.prompt("Select board", type=int, default=1) - 1
-                selected = devices[max(0, min(idx, len(devices) - 1))]
-            resolved_port = port or selected.port
-            board_name, fqbn = selected.board, selected.fqbn
-            if is_pio:
-                pio_board = selected.pio_board or click.prompt(
-                    "PlatformIO board id", default="esp32dev")
-                config.set_build_board(pio_board)
-            config.set_default_device(resolved_port, board_name, fqbn, baud)
+    click.pause("\nPlug your board into a USB port, then press any key…")
+    devices = boards_module.list_devices()
+    if devices:
+        click.echo("\nDetected boards:")
+        for i, d in enumerate(devices, 1):
+            click.echo(f"  {i}) {d.board} on {d.port}")
+        if len(devices) == 1:
+            selected = devices[0]
         else:
-            if not port:
-                port = click.prompt("No boards detected. Enter port manually")
-            resolved_port = port
-            board_name = click.prompt("Board name")
-            if is_pio:
-                config.set_build_board(click.prompt("PlatformIO board id (e.g. esp32dev)"))
-                fqbn = ""
-            else:
-                fqbn = click.prompt("Board FQBN (e.g. esp32:esp32:esp32)")
-            config.set_default_device(resolved_port, board_name, fqbn, baud)
-
+            idx = click.prompt("Select board", type=int, default=1) - 1
+            selected = devices[max(0, min(idx, len(devices) - 1))]
+        resolved_port = port or selected.port
+        board_name, fqbn = selected.board, selected.fqbn
         if is_pio:
-            from nff.tools.backends import platformio as pio
-            if not pio.find_platformio():
-                click.echo("\nPlatformIO not found — installing…")
-                ok, msg = pio.ensure_toolchain(emit=lambda l: click.echo(f"  {l}"))
-                if not ok:
-                    click.echo(f"Warning: could not install PlatformIO: {msg}")
-        elif not toolchain.find_arduino_cli():
-            click.echo("\narduino-cli not found — installing…")
-            try:
-                installer.install()
-            except Exception as exc:
-                click.echo(f"Warning: could not install arduino-cli: {exc}")
-
-        if is_pio:
-            click.echo("\nCloud platform onboarding currently runs on the arduino "
-                       "backend; skipping. Your board is configured for PlatformIO builds.")
-        else:
-            device = types.SimpleNamespace(port=resolved_port, board=board_name, fqbn=fqbn)
-            if fqbn.startswith("esp32") and click.confirm(
-                "\nConnect this device to the nff platform now?", default=True
-            ):
-                _onboard_platform(device)
-
+            pio_board = selected.pio_board or click.prompt(
+                "PlatformIO board id", default="esp32dev")
+            config.set_build_board(pio_board)
+        config.set_default_device(resolved_port, board_name, fqbn, baud)
     else:
-        sim_boards = _SIM_BOARDS_PIO if is_pio else _SIM_BOARDS
-        default_idx = 1 if is_pio else 5
-        click.echo("\nAvailable boards:")
-        for i, (name, ident) in enumerate(sim_boards, 1):
-            click.echo(f"  {i}) {name} ({ident})")
-        idx = click.prompt("Select board", type=int, default=default_idx) - 1
-        name, ident = sim_boards[max(0, min(idx, len(sim_boards) - 1))]
+        if not port:
+            port = click.prompt("No boards detected. Enter port manually")
+        resolved_port = port
+        board_name = click.prompt("Board name")
         if is_pio:
-            config.set_build_board(ident)
-            config.set_default_device("", name, "", 9600)
+            config.set_build_board(click.prompt("PlatformIO board id (e.g. esp32dev)"))
+            fqbn = ""
         else:
-            config.set_default_device("", name, ident, 9600)
+            fqbn = click.prompt("Board FQBN (e.g. esp32:esp32:esp32)")
+        config.set_default_device(resolved_port, board_name, fqbn, baud)
+
+    if is_pio:
+        from nff.tools.backends import platformio as pio
+        if not pio.find_platformio():
+            click.echo("\nPlatformIO not found — installing…")
+            ok, msg = pio.ensure_toolchain(emit=lambda l: click.echo(f"  {l}"))
+            if not ok:
+                click.echo(f"Warning: could not install PlatformIO: {msg}")
+    elif not toolchain.find_arduino_cli():
+        click.echo("\narduino-cli not found — installing…")
+        try:
+            installer.install()
+        except Exception as exc:
+            click.echo(f"Warning: could not install arduino-cli: {exc}")
+
+    if is_pio:
+        click.echo("\nCloud platform onboarding currently runs on the arduino "
+                   "backend; skipping. Your board is configured for PlatformIO builds.")
+    else:
+        device = types.SimpleNamespace(port=resolved_port, board=board_name, fqbn=fqbn)
+        if fqbn.startswith("esp32") and click.confirm(
+            "\nConnect this device to the nff platform now?", default=True
+        ):
+            _onboard_platform(device)
 
     _register_mcp()
 

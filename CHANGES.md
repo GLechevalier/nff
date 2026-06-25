@@ -13,7 +13,7 @@ The board-universal **PlatformIO backend** — previously only in the Python pro
 - **`nff install-deps`** auto-installs PlatformIO Core.
 - **`nff init --backend <platformio|arduino>`** persists the backend and seeds the PlatformIO board id from the detected device.
 
-> **Note:** `flash --sim` (Wokwi) is not yet wired for the PlatformIO backend — use `NFF_BUILD_BACKEND=arduino` to simulate. Verified end-to-end against real PlatformIO + ESP32; 105 cargo tests pass and `cargo clippy -- -D warnings` is clean.
+> **Note:** Verified end-to-end against real PlatformIO + ESP32; 105 cargo tests pass and `cargo clippy -- -D warnings` is clean. (Wokwi simulation has moved to the separate `nff-sim` package.)
 
 ---
 

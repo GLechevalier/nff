@@ -9,4 +9,3 @@ pub mod pio;
 pub mod retry;
 pub mod serial;
 pub mod toolchain;
-pub mod wokwi;

@@ -16,8 +16,6 @@ nff runs locally on your machine and communicates with hardware over USB. The at
 - **MCP server exposure** — the MCP server binds locally; any misconfiguration that exposes it to a network
 - **Dependency vulnerabilities** — in `esptool`, `pyserial`, or `arduino-cli`
 
-Out of scope: vulnerabilities in Wokwi's hosted infrastructure (report those to Wokwi directly).
-
 ## Reporting a Vulnerability
 
 **Do not open a public GitHub issue for security vulnerabilities.**

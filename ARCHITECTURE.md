@@ -3,8 +3,8 @@
 ## Overview
 
 `nff` (Python) is a CLI + MCP server that bridges Claude Code to IoT hardware.
-It lets Claude compile sketches, read/write serial, and run Wokwi simulations —
-either on real hardware or in a headless simulator.
+It lets Claude compile sketches, read/write serial, and flash real hardware.
+(Wokwi simulation lives in the separate `nff-sim` package.)
 
 ```
 Claude Code
@@ -15,7 +15,6 @@ nff MCP server  (nff/nff/mcp_server.py)
     ├── boards.py     USB device enumeration (pyserial)
     ├── serial.py     Serial read / write / reset
     ├── toolchain.py  arduino-cli subprocess wrappers
-    ├── wokwi.py      Wokwi CLI simulation runner
     ├── auth.py       OAuth / direct-login to diagnosis server
     └── config.py     ~/.nff/config.json  (persistent state)
 ```
@@ -53,7 +52,7 @@ tool calls within the same session.
 ## 2. Authentication
 
 Auth is only needed for the **diagnosis / repair** feature (sending crash logs to a
-remote server). It is not needed for flashing or simulation.
+remote server). It is not needed for flashing.
 
 ### Config location
 
@@ -126,11 +125,6 @@ All persistent state lives in one JSON file:
     "fqbn":  null,
     "baud":  9600
   },
-  "wokwi": {
-    "api_token":         null,
-    "default_timeout_ms": 5000,
-    "diagram_path":      null
-  },
   "diagnosis": {
     "server_url":    "http://127.0.0.1:8080",
     "access_token":  null,
@@ -147,15 +141,15 @@ Written atomically: write to `.json.tmp`, then `os.replace()`.
 
 Uses `serial.tools.list_ports.comports()` and matches against a static VID/PID map:
 
-| VID    | PID    | Board             | FQBN                        | Wokwi chip               |
-|--------|--------|-------------------|-----------------------------|--------------------------|
-| 0x2341 | 0x0043 | Arduino Uno       | `arduino:avr:uno`           | `wokwi-arduino-uno`      |
-| 0x2341 | 0x0010 | Arduino Mega 2560 | `arduino:avr:mega`          | `wokwi-arduino-mega`     |
-| 0x2341 | 0x0036 | Arduino Leonardo  | `arduino:avr:leonardo`      | `wokwi-arduino-leonardo` |
-| 0x2341 | 0x0058 | Arduino Nano      | `arduino:avr:nano`          | `wokwi-arduino-nano`     |
-| 0x10c4 | 0xea60 | ESP32 (CP210x)    | `esp32:esp32:esp32`         | `wokwi-esp32-devkit-v1`  |
-| 0x1a86 | 0x7523 | ESP32 (CH340)     | `esp32:esp32:esp32`         | `wokwi-esp32-devkit-v1`  |
-| 0x0403 | 0x6001 | ESP8266 (FTDI)    | `esp8266:esp8266:generic`   | `wokwi-esp8266`          |
+| VID    | PID    | Board             | FQBN                        |
+|--------|--------|-------------------|-----------------------------|
+| 0x2341 | 0x0043 | Arduino Uno       | `arduino:avr:uno`           |
+| 0x2341 | 0x0010 | Arduino Mega 2560 | `arduino:avr:mega`          |
+| 0x2341 | 0x0036 | Arduino Leonardo  | `arduino:avr:leonardo`      |
+| 0x2341 | 0x0058 | Arduino Nano      | `arduino:avr:nano`          |
+| 0x10c4 | 0xea60 | ESP32 (CP210x)    | `esp32:esp32:esp32`         |
+| 0x1a86 | 0x7523 | ESP32 (CH340)     | `esp32:esp32:esp32`         |
+| 0x0403 | 0x6001 | ESP8266 (FTDI)    | `esp8266:esp8266:generic`   |
 
 Only USB-identifiable boards appear; generic serial ports are ignored.
 
@@ -171,7 +165,7 @@ Port and FQBN fall back to `~/.nff/config.json` when not passed explicitly.
 | Tool | Required args | Optional args | Returns |
 |------|--------------|---------------|---------|
 | `list_devices` | — | — | JSON list of detected boards |
-| `get_device_info` | — | `port` | JSON: port, board, fqbn, baud, vid, pid, wokwi_chip |
+| `get_device_info` | — | `port` | JSON: port, board, fqbn, baud, vid, pid |
 | `flash` | `code` (sketch source) | `board` (FQBN), `port` | `"OK: flash complete…"` or `"ERROR: …"` |
 | `serial_read` | — | `duration_ms` (default 3000), `port`, `baud` | Captured serial text |
 | `serial_write` | `data` | `port`, `baud` | `"OK: wrote N byte(s) to <port>"` or `"ERROR: …"` |
@@ -184,23 +178,8 @@ looping until the deadline.
 
 **`reset_device`** toggles DTR low→50 ms→high to trigger the hardware reset line.
 
-### Wokwi simulation tools
-
-| Tool | Required args | Optional args | Returns |
-|------|--------------|---------------|---------|
-| `wokwi_flash` | `code` | `board` (FQBN), `timeout_ms` (default 5000) | JSON: `serial_output`, `compile_output`, `exit_code`, `simulated: true` |
-| `wokwi_serial_read` | `code` | `board`, `duration_ms` (default 3000) | Serial output string only |
-| `wokwi_get_diagram` | `board` (FQBN) | — | `diagram.json` as JSON string |
-
-**Simulation pipeline**:
-```
-compile(code, fqbn)          → .elf in /tmp/nff_sketch/
-generate_diagram(fqbn)       → minimal diagram.json (board only, no components)
-write_wokwi_toml(dir, elf)   → wokwi.toml pointing at .elf
-wokwi-cli run --timeout N    → subprocess, captures stdout as serial output
-```
-
-Wokwi token: read from `WOKWI_CLI_TOKEN` env var, then `~/.nff/config.json`.
+> Wokwi simulation tools (`wokwi_flash`, `wokwi_serial_read`, `wokwi_get_diagram`) moved
+> to the separate `nff-sim` package.
 
 ### Auth tools
 
@@ -223,16 +202,15 @@ Managed by Click in `cli.py`. These wrap the same tool layer as MCP.
 | Command | Description |
 |---------|-------------|
 | `nff init` | Interactive setup: detect board, write config, register MCP with Claude |
-| `nff flash <file>` | Compile + upload sketch (`--sim` for Wokwi simulation) |
+| `nff flash <file>` | Compile + upload sketch |
 | `nff monitor` | Stream serial output to stdout |
-| `nff doctor` | Check toolchain health (arduino-cli, wokwi-cli, config) |
+| `nff doctor` | Check toolchain health (arduino-cli, config) |
 | `nff connect` | Quick serial connection test |
 | `nff ota` | Over-the-air update |
 | `nff clean` | Remove build artefacts |
-| `nff install-deps` | Download arduino-cli and wokwi-cli |
+| `nff install-deps` | Download arduino-cli |
 | `nff mcp` | Start the MCP server (stdio) |
 | `nff auth login/logout/status` | Manage diagnosis server tokens |
-| `nff wokwi run/init` | Run Wokwi simulation or initialise project |
 | `nff repair` | Send serial output to diagnosis server from CLI |
 
 ---

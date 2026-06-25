@@ -75,40 +75,6 @@ struct PortParam {
 }
 
 #[derive(Deserialize, JsonSchema)]
-struct WokwiFlashParams {
-    /// Full Arduino/C++ sketch source code
-    code: String,
-    /// Board FQBN. Defaults to config.
-    board: Option<String>,
-    /// Simulation wall-clock timeout in milliseconds
-    #[serde(default = "default_5000")]
-    timeout_ms: u32,
-}
-fn default_5000() -> u32 {
-    5000
-}
-
-#[derive(Deserialize, JsonSchema)]
-struct WokwiSerialReadParams {
-    /// Full Arduino/C++ sketch source code
-    code: String,
-    /// Board FQBN. Defaults to config.
-    board: Option<String>,
-    /// Simulation duration in milliseconds
-    #[serde(default = "default_3000_u32")]
-    duration_ms: u32,
-}
-fn default_3000_u32() -> u32 {
-    3000
-}
-
-#[derive(Deserialize, JsonSchema)]
-struct BoardParam {
-    /// Board FQBN, e.g. 'arduino:avr:uno'
-    board: String,
-}
-
-#[derive(Deserialize, JsonSchema)]
 struct RepairParams {
     /// Raw serial/crash output to diagnose
     serial_output: String,
@@ -134,35 +100,6 @@ struct CompleteAuthParams {
 }
 fn default_120_u32() -> u32 {
     120
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-fn resolve_fqbn(board: Option<String>) -> Result<String, String> {
-    let fqbn = board
-        .or_else(|| {
-            crate::tools::config::get_default_device()
-                .ok()
-                .and_then(|d| d.fqbn)
-        })
-        .unwrap_or_default();
-    if fqbn.is_empty() {
-        Err("Missing board FQBN (pass board= or run `nff init`)".into())
-    } else {
-        Ok(fqbn)
-    }
-}
-
-fn json_sim_error(serial_output: &str, compile_output: &str, exit_code: i32) -> String {
-    json!({
-        "serial_output": serial_output,
-        "compile_output": compile_output,
-        "exit_code": exit_code,
-        "simulated": true,
-    })
-    .to_string()
 }
 
 // ---------------------------------------------------------------------------
@@ -544,7 +481,6 @@ impl NffServer {
                     "fqbn": d.fqbn,
                     "vendor_id": d.vendor_id,
                     "product_id": d.product_id,
-                    "wokwi_chip": d.wokwi_chip,
                 })
             })
             .collect();
@@ -631,7 +567,6 @@ impl NffServer {
                 "baud": baud,
                 "vendor_id": d.vendor_id,
                 "product_id": d.product_id,
-                "wokwi_chip": d.wokwi_chip,
             })
             .to_string()
         } else {
@@ -643,108 +578,8 @@ impl NffServer {
                 "baud": baud,
                 "vendor_id": "",
                 "product_id": "",
-                "wokwi_chip": null,
             })
             .to_string()
-        }
-    }
-
-    #[tool(
-        description = "Compile a sketch and run it in the Wokwi simulator. No hardware needed. Returns JSON with serial_output, compile_output, exit_code, simulated."
-    )]
-    fn wokwi_flash(&self, Parameters(p): Parameters<WokwiFlashParams>) -> String {
-        use crate::tools::{toolchain, wokwi};
-        let fqbn = match resolve_fqbn(p.board) {
-            Ok(f) => f,
-            Err(e) => return json_sim_error("", &e, 1),
-        };
-        let sketch_dir = match toolchain::write_sketch(&p.code, None) {
-            Ok(d) => d,
-            Err(e) => return json_sim_error("", &e.to_string(), 1),
-        };
-        let compile_result = match toolchain::compile_sketch(&sketch_dir, &fqbn) {
-            Ok(r) => r,
-            Err(e) => return json_sim_error("", &format!("compile error: {e}"), 1),
-        };
-        let compile_output = compile_result.output();
-        if !compile_result.success {
-            return json_sim_error("", &compile_output, compile_result.returncode);
-        }
-        let elf_path = match toolchain::locate_compiled_elf(&sketch_dir, &fqbn) {
-            Ok(p) => p,
-            Err(e) => {
-                return json_sim_error("", &format!("{compile_output}\nelf locate error: {e}"), 1)
-            }
-        };
-        let diagram = match wokwi::generate_diagram(&fqbn) {
-            Ok(d) => d,
-            Err(e) => {
-                return json_sim_error("", &format!("{compile_output}\nwokwi setup error: {e}"), 1)
-            }
-        };
-        if let Err(e) = std::fs::write(
-            sketch_dir.join("diagram.json"),
-            serde_json::to_string_pretty(&diagram).unwrap_or_default(),
-        ) {
-            return json_sim_error(
-                "",
-                &format!("{compile_output}\ndiagram.json write error: {e}"),
-                1,
-            );
-        }
-        if let Err(e) = wokwi::write_wokwi_toml(&sketch_dir, &elf_path) {
-            return json_sim_error("", &format!("{compile_output}\nwokwi.toml error: {e}"), 1);
-        }
-        match wokwi::run_simulation(&sketch_dir, p.timeout_ms, Some(&elf_path)) {
-            Ok(r) => json!({
-                "serial_output": r.serial_output,
-                "compile_output": compile_output,
-                "exit_code": r.exit_code,
-                "simulated": true,
-            })
-            .to_string(),
-            Err(e) => json_sim_error(&format!("wokwi error: {e}"), &compile_output, 1),
-        }
-    }
-
-    #[tool(description = "Compile and simulate a sketch, returning only the serial output string")]
-    fn wokwi_serial_read(&self, Parameters(p): Parameters<WokwiSerialReadParams>) -> String {
-        use crate::tools::{toolchain, wokwi};
-        let fqbn = match resolve_fqbn(p.board) {
-            Ok(f) => f,
-            Err(e) => return format!("ERROR: {e}"),
-        };
-        let sketch_dir = match toolchain::write_sketch(&p.code, None) {
-            Ok(d) => d,
-            Err(e) => return format!("ERROR: {e}"),
-        };
-        let compile_result = match toolchain::compile_sketch(&sketch_dir, &fqbn) {
-            Ok(r) => r,
-            Err(e) => return format!("ERROR: compile failed: {e}"),
-        };
-        if !compile_result.success {
-            return format!("ERROR: compile failed:\n{}", compile_result.output());
-        }
-        let elf_path = match toolchain::locate_compiled_elf(&sketch_dir, &fqbn) {
-            Ok(p) => p,
-            Err(e) => return format!("ERROR: {e}"),
-        };
-        let diagram = match wokwi::generate_diagram(&fqbn) {
-            Ok(d) => d,
-            Err(e) => return format!("ERROR: {e}"),
-        };
-        if let Err(e) = std::fs::write(
-            sketch_dir.join("diagram.json"),
-            serde_json::to_string_pretty(&diagram).unwrap_or_default(),
-        ) {
-            return format!("ERROR: {e}");
-        }
-        if let Err(e) = wokwi::write_wokwi_toml(&sketch_dir, &elf_path) {
-            return format!("ERROR: {e}");
-        }
-        match wokwi::run_simulation(&sketch_dir, p.duration_ms, Some(&elf_path)) {
-            Ok(r) => r.serial_output,
-            Err(e) => format!("ERROR: {e}"),
         }
     }
 
@@ -937,15 +772,6 @@ impl NffServer {
         .unwrap_or_else(|_| "ERROR: repair thread panicked".into())
     }
 
-    #[tool(
-        description = "Return a minimal diagram.json for the given board FQBN as a pretty-printed JSON string"
-    )]
-    fn wokwi_get_diagram(&self, Parameters(p): Parameters<BoardParam>) -> String {
-        match crate::tools::wokwi::generate_diagram(&p.board) {
-            Ok(d) => serde_json::to_string_pretty(&d).unwrap_or_else(|e| format!("ERROR: {e}")),
-            Err(e) => format!("ERROR: {e}"),
-        }
-    }
 }
 
 #[cfg(test)]
@@ -1011,38 +837,6 @@ mod tests {
         assert_eq!(p.baud, Some(115200));
     }
 
-    #[test]
-    fn wokwi_flash_defaults() {
-        let p: WokwiFlashParams = serde_json::from_str(r#"{"code":"sketch"}"#).unwrap();
-        assert_eq!(p.timeout_ms, 5000);
-        assert!(p.board.is_none());
-    }
-
-    #[test]
-    fn wokwi_serial_read_defaults() {
-        let p: WokwiSerialReadParams = serde_json::from_str(r#"{"code":"sketch"}"#).unwrap();
-        assert_eq!(p.duration_ms, 3000);
-        assert!(p.board.is_none());
-    }
-
-    #[test]
-    fn board_param_required() {
-        assert!(serde_json::from_str::<BoardParam>(r#"{}"#).is_err());
-        let p: BoardParam = serde_json::from_str(r#"{"board":"arduino:avr:uno"}"#).unwrap();
-        assert_eq!(p.board, "arduino:avr:uno");
-    }
-
-    #[test]
-    fn resolve_fqbn_explicit() {
-        let result = resolve_fqbn(Some("arduino:avr:uno".into()));
-        assert_eq!(result.unwrap(), "arduino:avr:uno");
-    }
-
-    #[test]
-    fn resolve_fqbn_empty_string_is_error() {
-        let result = resolve_fqbn(Some("".into()));
-        assert!(result.is_err(), "empty string should be treated as missing");
-    }
 }
 
 #[tool_handler]

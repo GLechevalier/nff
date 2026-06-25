@@ -4,15 +4,6 @@ use anyhow::Result;
 use std::io::{self, BufRead, Write};
 use which::which;
 
-const SIM_BOARDS: &[(&str, &str)] = &[
-    ("arduino:avr:uno", "Arduino Uno"),
-    ("arduino:avr:mega", "Arduino Mega 2560"),
-    ("arduino:avr:nano", "Arduino Nano"),
-    ("arduino:avr:leonardo", "Arduino Leonardo"),
-    ("esp32:esp32:esp32", "ESP32 DevKit V1"),
-    ("esp8266:esp8266:generic", "ESP8266"),
-];
-
 pub fn run(args: &InitArgs) -> Result<()> {
     // Sign in first — the MCP tools are gated behind a valid token, so a bench that
     // isn't logged in can't do anything. Aborts init if login fails.
@@ -22,13 +13,6 @@ pub fn run(args: &InitArgs) -> Result<()> {
     // later build — honours it (default stays platformio).
     if let Some(b) = &args.backend {
         config::set_build_backend(b)?;
-    }
-
-    if args.port.is_none() {
-        let mode = pick_mode()?;
-        if mode == 2 {
-            return run_sim_init(args.baud, args.force);
-        }
     }
 
     if toolchain::pio_active() {
@@ -179,48 +163,6 @@ fn start_mcp_server() {
     println!("  Restart Claude Code to pick up the nff MCP server.");
 }
 
-fn pick_mode() -> Result<u32> {
-    println!();
-    println!("How would you like to develop?");
-    println!("  1. Real board            Connect a physical device via USB");
-    println!("  2. Simulated environment  Develop without hardware using Wokwi");
-    println!();
-    print!("Select mode [1]: ");
-    io::stdout().flush()?;
-
-    let line = io::stdin()
-        .lock()
-        .lines()
-        .next()
-        .unwrap_or_else(|| Ok(String::new()))?;
-    let trimmed = line.trim();
-    if trimmed == "2" {
-        Ok(2)
-    } else {
-        Ok(1)
-    }
-}
-
-fn pick_sim_board() -> Result<String> {
-    println!();
-    println!("Select a target board for simulation:");
-    for (i, (fqbn, name)) in SIM_BOARDS.iter().enumerate() {
-        println!("  {}. {}  {}", i + 1, name, fqbn);
-    }
-    println!();
-    print!("Select board [1]: ");
-    io::stdout().flush()?;
-
-    let line = io::stdin()
-        .lock()
-        .lines()
-        .next()
-        .unwrap_or_else(|| Ok("1".to_string()))?;
-    let idx: usize = line.trim().parse().unwrap_or(1);
-    let idx = idx.max(1).min(SIM_BOARDS.len()) - 1;
-    Ok(SIM_BOARDS[idx].0.to_string())
-}
-
 fn pick_device(devices: &[boards::DetectedDevice]) -> Result<boards::DetectedDevice> {
     if devices.len() == 1 {
         return Ok(devices[0].clone());
@@ -261,63 +203,6 @@ fn ensure_arduino_cli() {
     }
 }
 
-fn run_sim_init(baud: u32, force: bool) -> Result<()> {
-    let fqbn = pick_sim_board()?;
-    ensure_arduino_cli();
-
-    let cwd = std::env::current_dir()?;
-    let toml_path = cwd.join("wokwi.toml");
-    let diagram_path = cwd.join("diagram.json");
-
-    let paths = [&toml_path, &diagram_path];
-    let existing: Vec<_> = paths.iter().filter(|p| p.exists()).collect();
-
-    if !existing.is_empty() && !force {
-        for p in &existing {
-            println!(
-                "  ⚠  {} already exists.",
-                p.file_name().unwrap_or_default().to_string_lossy()
-            );
-        }
-        println!("    Pass --force to overwrite.");
-        std::process::exit(1);
-    }
-
-    // Find board name from SIM_BOARDS
-    let board_name = SIM_BOARDS
-        .iter()
-        .find(|&&(f, _)| f == fqbn)
-        .map(|&(_, n)| n)
-        .unwrap_or("Unknown");
-
-    config::set_default_device("", board_name, &fqbn, baud)?;
-    println!("  ✓ Config written to {}", config::config_path().display());
-
-    // Write wokwi.toml
-    let elf_abs = toolchain::elf_path_for(&cwd, &fqbn);
-    let elf_rel = elf_abs.strip_prefix(&cwd).unwrap_or(&elf_abs);
-    std::fs::write(
-        &toml_path,
-        format!(
-            "[wokwi]\nversion = 1\nelf = \"{}\"\nfirmware = \"\"\n",
-            elf_rel.to_str().unwrap_or("").replace('\\', "/")
-        ),
-    )?;
-    println!("  ✓ wokwi.toml written");
-
-    register_mcp_claude_code();
-    start_mcp_server();
-
-    println!();
-    println!("  Next steps:");
-    println!("    1. Write your sketch  <name>.ino");
-    println!("    2. Compile + sim      nff flash --sim <name>.ino --board {fqbn}");
-    println!("    3. Visual sim         nff wokwi run --gui");
-    println!("    4. Add components to diagram.json using the Wokwi VS Code extension");
-
-    Ok(())
-}
-
 fn write_success(_port: &str, _board: &str, device: Option<&boards::DetectedDevice>) {
     if let Some(d) = device {
         // Under the PlatformIO backend, seed build.board from the detected device so
@@ -328,10 +213,9 @@ fn write_success(_port: &str, _board: &str, device: Option<&boards::DetectedDevi
                 println!("  ✓ PlatformIO board: {pio_board}");
             }
         }
-        let sim = d.wokwi_chip.as_deref().unwrap_or("no Wokwi support");
         println!(
-            "  ✓ Found: {} on {} (vendor: {}, product: {})  [sim: {}]",
-            d.board, d.port, d.vendor_id, d.product_id, sim
+            "  ✓ Found: {} on {} (vendor: {}, product: {})",
+            d.board, d.port, d.vendor_id, d.product_id
         );
     }
     println!("  ✓ Config written to {}", config::config_path().display());

@@ -275,8 +275,7 @@ async def test_get_device_info_falls_back_to_config_when_board_unknown(isolated_
 
 _ALL_TOOL_NAMES = {
     "list_devices", "compile", "flash", "serial_read", "serial_write",
-    "reset_device", "get_device_info", "wokwi_flash",
-    "wokwi_serial_read", "wokwi_get_diagram",
+    "reset_device", "get_device_info",
     "authenticate", "complete_authentication",
     "auth_logout", "auth_status",
     "auth_clear", "auth_reconnect",
