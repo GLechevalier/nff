@@ -18,7 +18,8 @@
       "Bash(python -c \"import nff.cli\")",
       "mcp__nff__flash",
       "mcp__nff__compile",
-      "mcp__nff__list_devices"
+      "mcp__nff__list_devices",
+      "mcp__nff__get_device_info"
     ]
   },
   "enabledMcpjsonServers": [
