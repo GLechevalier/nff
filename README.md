@@ -35,6 +35,84 @@ LLM: [captures panic over OTA] → [reads registers + backtrace] → "Stack over
 
 **Shipped as a single Rust binary.** The release artifact is the compiled `nff` binary built from `nff-rs/` — a self-contained executable with no Python runtime required. The Python package under `nff/nff/` remains as the reference/prototyping implementation (features are often prototyped there first, then ported to Rust at parity); both are kept in sync, version for version. The Rust port is at full feature parity (CLI commands, MCP server + OAuth proxy, the bench-loop hardening, the PlatformIO build backend, and the `nff pi` Raspberry-Pi probe).
 
+## Quickstart
+
+Get your hardware on the LLM loop in under five minutes.
+
+### 1. Install
+
+```bash
+pip install nff
+```
+
+`pip install nff` fetches a **prebuilt wheel containing the compiled Rust binary** for your platform (Linux x64, Windows x64, macOS arm64/x64) — no Python runtime and no Rust toolchain needed at runtime. pip is just the delivery mechanism; the installed `nff` command is the native binary.
+
+### 2. Install board cores
+
+On the **default PlatformIO backend** there is nothing to install here — PlatformIO Core is set up by `nff init`, and the platform/framework/esptool for your board auto-install on the first build. Just make sure your sketch names a PlatformIO board id (`--board esp32dev`, etc.).
+
+Only on the **arduino backend** do you install cores manually:
+
+```bash
+# arduino backend only — install the cores you need
+arduino-cli core install esp32:esp32
+arduino-cli core install arduino:avr
+arduino-cli core install esp8266:esp8266
+```
+
+> Both toolchains (`platformio` / `arduino-cli`) are auto-installed by `nff init`/`nff install-deps` for the active backend if not already present.
+
+### 3. Plug in your board and run init
+
+```bash
+nff init                      # default PlatformIO backend (board-universal)
+nff init --backend arduino    # opt into the arduino-cli backend instead
+```
+
+This single command:
+- **Signs you in** to the nff platform (browser login) — required, because the MCP tools are gated behind your account
+- Detects your board by USB vendor/product ID
+- Writes `~/.nff/config.json` (default device + build backend/board)
+- Installs the active backend's toolchain if missing (PlatformIO Core, or arduino-cli)
+- On the arduino backend with an ESP32, optionally enrolls the board on the nff platform (flash bootstrap firmware → claim into your dashboard)
+- Registers the nff MCP server with Claude Code (`claude mcp add --scope user --transport http nff http://127.0.0.1:3010/mcp`)
+- **Starts the MCP server in the background** so Claude Code finds it already running — no manual `nff mcp` needed
+
+```
+  ✓ Signed in to the nff platform
+  ✓ Found: ESP32 (CP210x) on COM10
+  ✓ Config written to ~/.nff/config.json
+  ✓ Registered with Claude Code CLI (HTTP MCP on 127.0.0.1:3010)
+  ✓ Server running on http://127.0.0.1:3010/mcp
+
+✓ nff configured! Restart Claude Code to pick up the nff MCP server.
+```
+
+> The background server runs until you reboot or stop it. After a reboot, run `nff mcp`
+> (or just re-run `nff init`) to bring it back up — `nff doctor` will tell you if it's down.
+
+### 4. Verify
+
+```bash
+nff doctor
+```
+
+### 5. Talk to your board
+
+Restart Claude Code (so it picks up the MCP server) and just describe what you want — Claude compiles, flashes, and reads serial through nff:
+
+```
+you: "Flash sketches/blink_esp32 and confirm the LED is toggling over serial"
+LLM: [compiles] → [flashes ESP32] → [reads serial] → "LED toggling at 1 Hz, confirmed"
+```
+
+Prefer the CLI directly? The same loop is a one-liner:
+
+```bash
+nff flash sketches/blink_esp32
+nff monitor --timeout 10
+```
+
 ---
 
 ## Two modes, one tool
@@ -133,68 +211,6 @@ All bench tools fall back to the default device in `~/.nff/config.json` when `po
 
 [![Real Hardware Programming](https://img.youtube.com/vi/JoCwczeRfuQ/maxresdefault.jpg)](https://youtu.be/JoCwczeRfuQ)
 
----
-
-## Quickstart
-
-Get your hardware on the LLM loop in under five minutes.
-
-### 1. Install
-
-```bash
-pip install nff
-```
-
-`pip install nff` fetches a **prebuilt wheel containing the compiled Rust binary** for your platform (Linux x64, Windows x64, macOS arm64/x64) — no Python runtime and no Rust toolchain needed at runtime. pip is just the delivery mechanism; the installed `nff` command is the native binary.
-
-### 2. Install board cores
-
-On the **default PlatformIO backend** there is nothing to install here — PlatformIO Core is set up by `nff init`, and the platform/framework/esptool for your board auto-install on the first build. Just make sure your sketch names a PlatformIO board id (`--board esp32dev`, etc.).
-
-Only on the **arduino backend** do you install cores manually:
-
-```bash
-# arduino backend only — install the cores you need
-arduino-cli core install esp32:esp32
-arduino-cli core install arduino:avr
-arduino-cli core install esp8266:esp8266
-```
-
-> Both toolchains (`platformio` / `arduino-cli`) are auto-installed by `nff init`/`nff install-deps` for the active backend if not already present.
-
-### 3. Plug in your board and run init
-
-```bash
-nff init
-```
-
-This single command:
-- **Signs you in** to the nff platform (browser login) — required, because the MCP tools are gated behind your account
-- Detects your board by USB vendor/product ID
-- Writes `~/.nff/config.json` (default device + build backend/board)
-- Installs the active backend's toolchain if missing (PlatformIO Core, or arduino-cli)
-- On the arduino backend with an ESP32, optionally enrolls the board on the nff platform (flash bootstrap firmware → claim into your dashboard)
-- Registers the nff MCP server with Claude Code (`claude mcp add --scope user --transport http nff http://127.0.0.1:3010/mcp`)
-- **Starts the MCP server in the background** so Claude Code finds it already running — no manual `nff mcp` needed
-
-```
-  ✓ Signed in to the nff platform
-  ✓ Found: ESP32 (CP210x) on COM10
-  ✓ Config written to ~/.nff/config.json
-  ✓ Registered with Claude Code CLI (HTTP MCP on 127.0.0.1:3010)
-  ✓ Server running on http://127.0.0.1:3010/mcp
-
-✓ nff configured! Restart Claude Code to pick up the nff MCP server.
-```
-
-> The background server runs until you reboot or stop it. After a reboot, run `nff mcp`
-> (or just re-run `nff init`) to bring it back up — `nff doctor` will tell you if it's down.
-
-### 4. Verify
-
-```bash
-nff doctor
-```
 
 ---
 
