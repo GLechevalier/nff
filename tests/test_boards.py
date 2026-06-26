@@ -2,12 +2,16 @@
 
 from unittest.mock import MagicMock, patch
 
+import json
+
 from nff.tools.boards import (
     BOARD_MAP,
     DetectedDevice,
+    _build_manifest_index,
     _identify,
     _normalize_id,
     find_device,
+    identify_ids,
     list_devices,
 )
 
@@ -160,3 +164,87 @@ def test_detected_device_is_dataclass():
                        vendor_id="1234", product_id="5678")
     assert d.port == "COM1"
     assert d.fqbn == "a:b:c"
+
+
+def test_board_map_has_new_native_families():
+    # Layer A native-USB additions resolve via identify_ids (curated, empty Layer B index).
+    cases = {
+        (0x2e8a, 0x000a): "pico",                # RP2040 Pico CDC
+        (0x16c0, 0x0483): "teensy41",            # Teensy
+        (0x303a, 0x1001): "esp32-s3-devkitc-1",  # ESP32-S3 USB-JTAG
+        (0x2A03, 0x0043): "uno",                 # Arduino SRL VID
+    }
+    for (vid, pid), want in cases.items():
+        ident = identify_ids(vid, pid, {})
+        assert ident is not None, f"{vid:04x}:{pid:04x} not in BOARD_MAP"
+        assert ident["pio_board"] == want
+
+
+# ---------------------------------------------------------------------------
+# Layer B — PlatformIO manifest hwid index + precedence
+# ---------------------------------------------------------------------------
+
+def _write_manifest(boards_dir, board_id, name, hwids):
+    boards_dir.mkdir(parents=True, exist_ok=True)
+    body = {"name": name, "build": {"mcu": "x", "hwids": hwids}}
+    (boards_dir / f"{board_id}.json").write_text(json.dumps(body), encoding="utf-8")
+
+
+def test_build_manifest_index_native_board(tmp_path):
+    boards = tmp_path / "ststm32" / "boards"
+    _write_manifest(boards, "bluepill_f103c8", "BluePill F103C8",
+                    [["0x1EAF", "0x0003"], ["0x1EAF", "0x0004"]])
+    idx = _build_manifest_index(tmp_path)
+    hit = idx[(0x1EAF, 0x0003)]
+    assert hit["board"] == "bluepill_f103c8"
+    assert hit["platform"] == "ststm32"
+    assert hit["name"] == "BluePill F103C8"
+
+
+def test_build_manifest_index_drops_ambiguous(tmp_path):
+    boards = tmp_path / "espressif32" / "boards"
+    _write_manifest(boards, "board_a", "Board A", [["0x303a", "0x4001"]])
+    _write_manifest(boards, "board_b", "Board B", [["0x303a", "0x4001"]])
+    idx = _build_manifest_index(tmp_path)
+    assert (0x303a, 0x4001) not in idx
+
+
+def test_build_manifest_index_skips_bridge_vid(tmp_path):
+    boards = tmp_path / "espressif32" / "boards"
+    _write_manifest(boards, "esp32-evb", "Olimex EVB", [["0x1a86", "0x7523"]])
+    idx = _build_manifest_index(tmp_path)
+    assert (0x1a86, 0x7523) not in idx
+
+
+def test_build_manifest_index_tolerates_malformed(tmp_path):
+    boards = tmp_path / "ststm32" / "boards"
+    boards.mkdir(parents=True, exist_ok=True)
+    (boards / "broken.json").write_text("{ not json", encoding="utf-8")
+    _write_manifest(boards, "good", "Good Board",
+                    [["0xCAFE", "0x0001", "extra"], ["zz", "yy"], ["0xCAFE", "0x0002"]])
+    idx = _build_manifest_index(tmp_path)
+    assert idx[(0xCAFE, 0x0001)]["board"] == "good"
+    assert idx[(0xCAFE, 0x0002)]["board"] == "good"
+
+
+def test_build_manifest_index_missing_dir(tmp_path):
+    assert _build_manifest_index(tmp_path / "nope" / "platforms") == {}
+
+
+def test_identify_curated_wins_over_manifest():
+    # Even if a manifest surfaces the CH340 id, the curated default wins.
+    index = {(0x1a86, 0x7523): {"name": "Some Olimex", "board": "esp32-evb", "platform": "espressif32"}}
+    ident = identify_ids(0x1a86, 0x7523, index)
+    assert ident["board"] == "ESP32 (CH340)"
+    assert ident["pio_board"] == "esp32dev"
+
+
+def test_identify_layer_b_hit_has_empty_fqbn():
+    index = {(0x1EAF, 0x0003): {"name": "BluePill F103C8", "board": "bluepill_f103c8", "platform": "ststm32"}}
+    ident = identify_ids(0x1EAF, 0x0003, index)
+    assert ident["fqbn"] == ""
+    assert ident["pio_board"] == "bluepill_f103c8"
+
+
+def test_identify_unknown_returns_none_with_empty_index():
+    assert identify_ids(0xDEAD, 0xBEEF, {}) is None

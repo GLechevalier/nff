@@ -171,6 +171,15 @@ pub fn config_path() -> PathBuf {
         .join("config.json")
 }
 
+/// The nff state directory (parent of config.json) — also home to caches like the
+/// PlatformIO board-hwid index. Honors the same `NFF_CONFIG_DIR` override as `config_path`.
+pub fn config_dir() -> PathBuf {
+    config_path()
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
 pub fn exists() -> bool {
     config_path().exists()
 }

@@ -19,7 +19,12 @@
       "mcp__nff__flash",
       "mcp__nff__compile",
       "mcp__nff__list_devices",
-      "mcp__nff__get_device_info"
+      "mcp__nff__get_device_info",
+      "PowerShell(cargo test *)",
+      "PowerShell(cargo clippy *)",
+      "PowerShell(python -m pytest tests/test_boards.py -q 2>&1 | Select-Object -Last 40)",
+      "PowerShell(python -m pytest tests/test_mcp.py tests/test_init.py -q 2>&1 | Select-Object -Last 40)",
+      "PowerShell(cargo build *)"
     ]
   },
   "enabledMcpjsonServers": [

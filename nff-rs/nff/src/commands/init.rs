@@ -206,10 +206,15 @@ fn ensure_arduino_cli() {
 fn write_success(_port: &str, _board: &str, device: Option<&boards::DetectedDevice>) {
     if let Some(d) = device {
         // Under the PlatformIO backend, seed build.board from the detected device so
-        // `nff compile`/`flash` work without an explicit --board.
+        // `nff compile`/`flash` work without an explicit --board. Prefer the device's own
+        // pio_board (set by both detection layers); fall back to deriving it from the FQBN.
         if toolchain::pio_active() {
-            if let Some(pio_board) = boards::fqbn_to_pio_board(&d.fqbn) {
-                let _ = config::set_build_board(Some(pio_board));
+            let pio_board = d
+                .pio_board
+                .clone()
+                .or_else(|| boards::fqbn_to_pio_board(&d.fqbn).map(str::to_string));
+            if let Some(pio_board) = pio_board {
+                let _ = config::set_build_board(Some(pio_board.as_str()));
                 println!("  ✓ PlatformIO board: {pio_board}");
             }
         }
