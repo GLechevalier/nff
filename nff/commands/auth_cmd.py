@@ -6,9 +6,14 @@ from nff import config
 from nff.tools import auth as auth_tools
 
 
-@click.group("auth")
-def auth_cli():
-    """Manage nff diagnosis server authentication."""
+@click.group("auth", invoke_without_command=True)
+@click.pass_context
+def auth_cli(ctx):
+    """Manage nff diagnosis server authentication.
+
+    Run bare `nff auth` to sign in (browser OAuth)."""
+    if ctx.invoked_subcommand is None:
+        ctx.invoke(login)
 
 
 @auth_cli.command("login")
@@ -31,12 +36,15 @@ def login(email, password, server):
         except Exception as exc:
             raise click.ClickException(f"Could not bind callback server: {exc}")
         callback_url = f"http://127.0.0.1:{port}/callback"
-        portal_url = f"{server_url}/auth/portal?cb={auth_tools.percent_encode(callback_url)}"
-        click.echo(f"Opening browser: {portal_url}")
+        # Use the frontend's /login page (same route the MCP `authenticate` flow uses) —
+        # the SPA has no /auth/portal route.
+        frontend_url = cfg.get("frontend_url", "https://nanoforgeflow.com")
+        login_url = f"{frontend_url}/login?cb={auth_tools.percent_encode(callback_url)}"
+        click.echo(f"Opening browser: {login_url}")
         try:
-            auth_tools.open_browser(portal_url)
+            auth_tools.open_browser(login_url)
         except Exception:
-            click.echo(f"Visit manually: {portal_url}")
+            click.echo(f"Visit manually: {login_url}")
         try:
             tokens = auth_tools.wait_for_callback(sock, 300)
         except TimeoutError as exc:
@@ -48,10 +56,8 @@ def login(email, password, server):
     click.echo("OK: authenticated")
 
 
-@auth_cli.command("logout")
-@click.option("--server", default=None)
-def logout(server):
-    """Log out from the nff diagnosis server."""
+def _logout(server):
+    """Revoke the session server-side (best-effort) and clear all local tokens."""
     import requests as _requests
     cfg = config.get_diagnosis_config()
     server_url = server or cfg.get("server_url", "http://127.0.0.1:8080")
@@ -68,6 +74,20 @@ def logout(server):
     config.clear_diagnosis_tokens()
     config.clear_mcp_tokens()
     click.echo("OK: logged out")
+
+
+@auth_cli.command("logout")
+@click.option("--server", default=None)
+def logout(server):
+    """Log out from the nff diagnosis server."""
+    _logout(server)
+
+
+@click.command("deauth")
+@click.option("--server", default=None)
+def deauth(server):
+    """Sign out and clear saved credentials (alias for `nff auth logout`)."""
+    _logout(server)
 
 
 @auth_cli.command("status")

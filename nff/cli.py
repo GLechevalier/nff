@@ -4,7 +4,7 @@ import click
 
 from nff import __version__
 from nff.commands.agent_cmd import agent
-from nff.commands.auth_cmd import auth_cli
+from nff.commands.auth_cmd import auth_cli, deauth
 from nff.commands.clean import clean
 from nff.commands.compile_cmd import compile_cmd
 from nff.commands.connect import connect
@@ -38,6 +38,7 @@ cli.add_command(provision)
 cli.add_command(install_deps)
 cli.add_command(mcp)
 cli.add_command(auth_cli, name="auth")
+cli.add_command(deauth, name="deauth")
 cli.add_command(repair)
 cli.add_command(agent)
 cli.add_command(pi, name="pi")

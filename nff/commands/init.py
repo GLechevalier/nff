@@ -39,7 +39,6 @@ def _ensure_logged_in() -> bool:
     cfg = config.get_diagnosis_config()
     if cfg.get("access_token"):
         return True
-    server_url = cfg.get("server_url")
     click.echo("\nYou're not signed in to the nff platform. Opening your browser…")
     try:
         sock, port = auth_tools.bind_callback_server()
@@ -47,12 +46,15 @@ def _ensure_logged_in() -> bool:
         click.echo(f"  Could not start login: {exc}")
         return False
     callback_url = f"http://127.0.0.1:{port}/callback"
-    portal_url = f"{server_url}/auth/portal?cb={auth_tools.percent_encode(callback_url)}"
+    # Use the frontend's /login page (same route the MCP `authenticate` flow uses) —
+    # the SPA has no /auth/portal route.
+    frontend_url = cfg.get("frontend_url", "https://nanoforgeflow.com")
+    login_url = f"{frontend_url}/login?cb={auth_tools.percent_encode(callback_url)}"
     try:
-        auth_tools.open_browser(portal_url)
+        auth_tools.open_browser(login_url)
     except Exception:
         pass
-    click.echo(f"  If your browser didn't open, visit: {portal_url}")
+    click.echo(f"  If your browser didn't open, visit: {login_url}")
     try:
         tokens = auth_tools.wait_for_callback(sock, 300)
     except TimeoutError:

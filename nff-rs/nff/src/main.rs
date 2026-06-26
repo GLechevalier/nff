@@ -4,7 +4,7 @@ mod mcp_server;
 mod tools;
 
 use clap::Parser;
-use cli::{AuthSubcommands, Cli, Commands, PiSubcommands, ProvisionSubcommands};
+use cli::{AuthLoginArgs, AuthSubcommands, Cli, Commands, PiSubcommands, ProvisionSubcommands};
 
 fn main() {
     let cli = Cli::parse();
@@ -29,10 +29,13 @@ fn main() {
             .expect("failed to create tokio runtime")
             .block_on(commands::mcp::run(&args)),
         Commands::Auth(a) => match a.sub {
-            AuthSubcommands::Login(args) => commands::auth::run_login(&args),
-            AuthSubcommands::Logout(args) => commands::auth::run_logout(&args),
-            AuthSubcommands::Status => commands::auth::run_status(),
+            Some(AuthSubcommands::Login(args)) => commands::auth::run_login(&args),
+            Some(AuthSubcommands::Logout(args)) => commands::auth::run_logout(&args),
+            Some(AuthSubcommands::Status) => commands::auth::run_status(),
+            // Bare `nff auth` → browser login (email/password default to None).
+            None => commands::auth::run_login(&AuthLoginArgs::default()),
         },
+        Commands::Deauth(args) => commands::auth::run_logout(&args),
         Commands::Repair(args) => commands::repair::run(&args),
         Commands::Provision(p) => match p.sub {
             ProvisionSubcommands::Batch(args) => commands::provision::run_batch(&args),

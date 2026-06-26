@@ -26,7 +26,10 @@ pub enum Commands {
     #[command(name = "install-deps")]
     InstallDeps(InstallDepsArgs),
     Mcp(McpArgs),
+    #[command(about = "Manage authentication; bare `nff auth` signs in (browser OAuth).")]
     Auth(AuthCommand),
+    #[command(about = "Sign out and clear saved credentials (alias for `auth logout`).")]
+    Deauth(AuthLogoutArgs),
     Repair(RepairArgs),
     Provision(ProvisionCommand),
     Agent(AgentArgs),
@@ -140,8 +143,9 @@ pub struct McpArgs {
 
 #[derive(Args)]
 pub struct AuthCommand {
+    /// Optional: bare `nff auth` (no subcommand) runs the login flow.
     #[command(subcommand)]
-    pub sub: AuthSubcommands,
+    pub sub: Option<AuthSubcommands>,
 }
 
 #[derive(Subcommand)]
@@ -154,7 +158,7 @@ pub enum AuthSubcommands {
     Status,
 }
 
-#[derive(Args)]
+#[derive(Args, Default)]
 pub struct AuthLoginArgs {
     #[arg(
         long,

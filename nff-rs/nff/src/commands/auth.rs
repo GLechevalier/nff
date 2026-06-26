@@ -20,21 +20,22 @@ pub fn run_login(args: &AuthLoginArgs) -> Result<()> {
         return Ok(());
     }
 
-    // Interactive browser flow
+    // Interactive browser flow. Use the frontend's /login page (same route the MCP
+    // `authenticate` flow uses) — the SPA has no /auth/portal route.
     let (listener, port) = tools::auth::bind_callback_server()?;
     let callback_url = format!("http://127.0.0.1:{port}/callback");
-    let portal_url = format!(
-        "{}/auth/portal?cb={}",
-        server_url,
+    let login_url = format!(
+        "{}/login?cb={}",
+        config.diagnosis.frontend_url,
         tools::auth::percent_encode(&callback_url)
     );
 
     println!("Opening browser to sign in…");
-    println!("  {portal_url}");
+    println!("  {login_url}");
     println!();
     println!("If the browser does not open, paste the URL above into your browser.");
 
-    tools::auth::open_browser(&portal_url)?;
+    tools::auth::open_browser(&login_url)?;
 
     println!("Waiting for login (timeout 5 min, Ctrl+C to cancel)…");
     let tokens = tools::auth::wait_for_callback(listener, 300)?;

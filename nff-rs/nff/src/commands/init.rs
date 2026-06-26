@@ -125,13 +125,15 @@ fn ensure_logged_in() -> bool {
         }
     };
     let callback_url = format!("http://127.0.0.1:{port}/callback");
-    let portal_url = format!(
-        "{}/auth/portal?cb={}",
-        cfg.diagnosis.server_url,
+    // Use the frontend's /login page (same route the MCP `authenticate` flow uses) —
+    // the SPA has no /auth/portal route.
+    let login_url = format!(
+        "{}/login?cb={}",
+        cfg.diagnosis.frontend_url,
         auth::percent_encode(&callback_url)
     );
-    let _ = auth::open_browser(&portal_url);
-    println!("  If your browser didn't open, visit: {portal_url}");
+    let _ = auth::open_browser(&login_url);
+    println!("  If your browser didn't open, visit: {login_url}");
     match auth::wait_for_callback(listener, 300) {
         Ok(tokens) => {
             if config::set_diagnosis_tokens(&tokens.access_token, &tokens.refresh_token).is_err() {
