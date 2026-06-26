@@ -1,6 +1,6 @@
 [package]
 name = "nff"
-version = "0.2.31"
+version = "0.2.32"
 edition = "2021"
 
 [[bin]]
