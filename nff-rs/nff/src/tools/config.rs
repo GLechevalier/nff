@@ -27,6 +27,8 @@ pub struct Config {
     pub agent: AgentConfig,
     #[serde(default)]
     pub build: BuildConfig,
+    #[serde(default)]
+    pub debug: DebugConfig,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -143,6 +145,22 @@ impl Default for BuildConfig {
     }
 }
 
+/// On-chip debug config (`nff debug` / the debug_* MCP tools). All keys are optional
+/// overrides — when empty, nff auto-detects openocd_path/gdb_path from PlatformIO's package
+/// cache (else PATH), openocd_config from the chip's built-in-JTAG/ST-Link cfg, and
+/// interface for an external probe.
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct DebugConfig {
+    #[serde(default)]
+    pub openocd_path: Option<String>,
+    #[serde(default)]
+    pub gdb_path: Option<String>,
+    #[serde(default)]
+    pub openocd_config: Option<String>,
+    #[serde(default)]
+    pub interface: Option<String>,
+}
+
 impl Default for Config {
     fn default() -> Self {
         Config {
@@ -152,6 +170,7 @@ impl Default for Config {
             mcp: McpConfig::default(),
             agent: AgentConfig::default(),
             build: BuildConfig::default(),
+            debug: DebugConfig::default(),
         }
     }
 }
@@ -283,6 +302,10 @@ pub fn clear_mcp_tokens() -> Result<(), ConfigError> {
 #[allow(dead_code)]
 pub fn get_build_config() -> Result<BuildConfig, ConfigError> {
     Ok(load()?.build)
+}
+
+pub fn get_debug_config() -> Result<DebugConfig, ConfigError> {
+    Ok(load()?.debug)
 }
 
 pub fn set_build_backend(backend: &str) -> Result<(), ConfigError> {

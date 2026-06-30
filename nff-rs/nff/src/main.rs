@@ -4,7 +4,10 @@ mod mcp_server;
 mod tools;
 
 use clap::Parser;
-use cli::{AuthLoginArgs, AuthSubcommands, Cli, Commands, PiSubcommands, ProvisionSubcommands};
+use cli::{
+    AuthLoginArgs, AuthSubcommands, Cli, Commands, DebugStartArgs, DebugSubcommands,
+    PiSubcommands, ProvisionSubcommands,
+};
 
 fn main() {
     let cli = Cli::parse();
@@ -43,6 +46,16 @@ fn main() {
         Commands::Agent(args) => commands::agent::run(&args),
         Commands::Pi(p) => match p.sub {
             PiSubcommands::Probe(args) => commands::pi::run_probe(&args),
+        },
+        Commands::Debug(d) => match d.sub {
+            Some(DebugSubcommands::Check(args)) => commands::debug::run_check(&args),
+            Some(DebugSubcommands::Start(args)) => commands::debug::run_start(&args),
+            // Bare `nff debug` → start a session with the group-level flags.
+            None => commands::debug::run_start(&DebugStartArgs {
+                elf: d.elf,
+                board: d.board,
+                interface: d.interface,
+            }),
         },
     };
 

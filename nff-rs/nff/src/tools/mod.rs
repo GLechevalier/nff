@@ -3,6 +3,7 @@ pub mod auth;
 pub mod boards;
 pub mod config;
 pub mod daemon;
+pub mod debug;
 pub mod installer;
 pub mod pi;
 pub mod pio;

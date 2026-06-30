@@ -8,6 +8,7 @@ from nff.commands.auth_cmd import auth_cli, deauth
 from nff.commands.clean import clean
 from nff.commands.compile_cmd import compile_cmd
 from nff.commands.connect import connect
+from nff.commands.debug import debug
 from nff.commands.doctor import doctor
 from nff.commands.flash import flash
 from nff.commands.init import init
@@ -33,6 +34,7 @@ cli.add_command(monitor)
 cli.add_command(doctor)
 cli.add_command(clean)
 cli.add_command(connect)
+cli.add_command(debug)
 cli.add_command(ota)
 cli.add_command(provision)
 cli.add_command(install_deps)

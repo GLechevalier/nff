@@ -287,6 +287,11 @@ _ALL_TOOL_NAMES = {
     "auth_logout", "auth_status",
     "auth_clear", "auth_reconnect",
     "repair",
+    # live on-chip debugging
+    "debug_start", "debug_stop", "get_session_info", "get_call_stack",
+    "get_variables", "expand_variable", "get_registers", "get_memory",
+    "evaluate", "set_breakpoint", "pause_execution", "continue_execution",
+    "step", "gdb_command",
 }
 
 

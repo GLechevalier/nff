@@ -34,6 +34,8 @@ pub enum Commands {
     Provision(ProvisionCommand),
     Agent(AgentArgs),
     Pi(PiCommand),
+    #[command(about = "Live on-chip debugging (OpenOCD + GDB); bare `nff debug` starts a session.")]
+    Debug(DebugCommand),
 }
 
 #[derive(Args)]
@@ -301,6 +303,45 @@ pub struct PiProbeArgs {
     pub sweep: bool,
     #[arg(long, help = "Emit machine-readable JSON.")]
     pub json: bool,
+}
+
+// ── debug ─────────────────────────────────────────────────────────────────
+
+#[derive(Args)]
+pub struct DebugCommand {
+    /// Optional: bare `nff debug` (no subcommand) starts a session.
+    #[command(subcommand)]
+    pub sub: Option<DebugSubcommands>,
+    #[arg(long, value_name = "PATH", help = "Path to a built .elf (defaults to the last build).")]
+    pub elf: Option<String>,
+    #[arg(long, value_name = "FQBN", help = "Board id/FQBN to derive the chip family.")]
+    pub board: Option<String>,
+    #[arg(long, value_name = "CFG", help = "OpenOCD interface cfg for an external JTAG probe.")]
+    pub interface: Option<String>,
+}
+
+#[derive(Subcommand)]
+pub enum DebugSubcommands {
+    #[command(about = "Report the OpenOCD/GDB binaries, chip, and ELF nff would use — no hardware.")]
+    Check(DebugCheckArgs),
+    #[command(about = "Start a debug session and enter an interactive prompt.")]
+    Start(DebugStartArgs),
+}
+
+#[derive(Args, Default)]
+pub struct DebugCheckArgs {
+    #[arg(long, value_name = "FQBN", help = "Board id/FQBN to derive the chip family.")]
+    pub board: Option<String>,
+}
+
+#[derive(Args, Default)]
+pub struct DebugStartArgs {
+    #[arg(long, value_name = "PATH", help = "Path to a built .elf (defaults to the last build).")]
+    pub elf: Option<String>,
+    #[arg(long, value_name = "FQBN", help = "Board id/FQBN to derive the chip family.")]
+    pub board: Option<String>,
+    #[arg(long, value_name = "CFG", help = "OpenOCD interface cfg for an external JTAG probe.")]
+    pub interface: Option<String>,
 }
 
 #[derive(Args)]
