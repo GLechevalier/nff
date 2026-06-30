@@ -245,13 +245,26 @@ fn parse_query(q: &Option<String>) -> HashMap<String, String> {
     map
 }
 
+/// True when the operator has explicitly disabled the `/mcp` Bearer gate via the
+/// `NFF_MCP_NO_AUTH` env var (accepts `1`/`true`/`yes`/`on`, case-insensitive).
+/// Default (unset) keeps the gate enforced — opting out is a deliberate, local-only act.
+fn auth_disabled() -> bool {
+    std::env::var("NFF_MCP_NO_AUTH")
+        .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+        .unwrap_or(false)
+}
+
 /// Bearer guard on `/mcp`: accept the opaque MCP access token OR (legacy) the raw
 /// diagnosis JWT, so sessions authorized before opaque tokens existed keep working.
+/// Short-circuits to open access when `NFF_MCP_NO_AUTH` is set (see `auth_disabled`).
 async fn bearer_auth(
     State(oauth): State<Arc<OAuthState>>,
     request: axum::extract::Request,
     next: Next,
 ) -> Response {
+    if auth_disabled() {
+        return next.run(request).await;
+    }
     let presented = request
         .headers()
         .get(header::AUTHORIZATION)
