@@ -61,6 +61,13 @@ It validates `Authorization: Bearer <token>` against the opaque MCP token
 only for liveness probing.) This gate is the whole reason the server is HTTP, not stdio:
 stdio can't gate the tools.
 
+**Disabling the gate (`NFF_MCP_NO_AUTH`):** set the env var `NFF_MCP_NO_AUTH=1` (also accepts
+`true`/`yes`/`on`) in the environment the server is launched from to bypass the Bearer check on
+`/mcp` entirely — no token, no OAuth handshake, no "needs authentication". Unset (the default)
+keeps the gate enforced. This is a single-knob, local-only opt-out for single-user benches; never
+set it on anything network-reachable, since it makes every tool callable without credentials.
+Implemented in both `bearer_auth` (Rust, `mcp_server.rs`) and `_NffASGI` (Python, `mcp_server.py`).
+
 **One-time bootstrap order:**
 
 ```
