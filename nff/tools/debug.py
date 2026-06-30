@@ -18,6 +18,7 @@ same toolchain nff's default backend already installs — falling back to ``PATH
 
 from __future__ import annotations
 
+import re
 import shutil
 import socket
 import subprocess
@@ -48,9 +49,53 @@ _RISCV_CHIPS = frozenset({"esp32c3", "esp32c6", "esp32c2", "esp32h2", "esp32p4"}
 # Chip families, longest/most-specific token first so "esp32s3" wins over "esp32".
 _CHIP_TOKENS = ("esp32s3", "esp32s2", "esp32c6", "esp32c3", "esp32c2", "esp32h2", "esp32p4", "esp32")
 
+# STM32 family (e.g. "f4") → the OpenOCD target/*.cfg basename. Most are stm32<fam>x;
+# the L0/L1 parts drop the trailing x. Unknown families need an explicit openocd_config.
+_STM32_TARGETS = {
+    "f0": "stm32f0x", "f1": "stm32f1x", "f2": "stm32f2x", "f3": "stm32f3x",
+    "f4": "stm32f4x", "f7": "stm32f7x", "g0": "stm32g0x", "g4": "stm32g4x",
+    "h7": "stm32h7x", "l0": "stm32l0", "l1": "stm32l1", "l4": "stm32l4x",
+    "l5": "stm32l5x", "u5": "stm32u5x", "wb": "stm32wbx", "wl": "stm32wlx",
+}
+
 
 class DebugError(Exception):
     """A debug-session fault surfaced to the caller as ``ERROR: <msg>``."""
+
+
+def _norm(s: str) -> str:
+    return s.lower().replace("-", "").replace(":", "").replace("_", "")
+
+
+def _family(chip: str) -> str:
+    """The toolchain family for a chip id: "arm" (STM32), "riscv", or "xtensa"."""
+    if chip.startswith("stm32") or chip.startswith("arm"):
+        return "arm"
+    if chip in _RISCV_CHIPS:
+        return "riscv"
+    return "xtensa"
+
+
+def _stm32_family(candidates) -> str:
+    """Extract the STM32 family digit-pair (e.g. "f4") from board/FQBN candidates."""
+    for raw in candidates:
+        m = re.search(r"(?:stm32|nucleo|bluepill|disco)[a-z0-9]*?([fghluw]\d)", _norm(raw))
+        if m:
+            return m.group(1)
+    return ""
+
+
+def autodetect_board() -> Optional[str]:
+    """The PlatformIO board id (or FQBN) of the first connected device, so `nff debug`
+    targets the plugged-in board even before `nff init` records it. None if nothing is
+    connected or detection fails."""
+    try:
+        from nff.tools import boards
+        for d in boards.list_devices():
+            return d.pio_board or d.fqbn or d.board or None
+    except Exception:
+        return None
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -58,12 +103,15 @@ class DebugError(Exception):
 # ---------------------------------------------------------------------------
 
 def detect_chip(board: Optional[str] = None) -> str:
-    """Best-effort ESP32 chip family ("esp32s3", "esp32c3", … or "esp32").
+    """Best-effort chip id: an ESP32 family ("esp32s3"…), an STM32 family ("stm32f4"),
+    or "esp32" as a default.
 
     Looks at the passed board id/FQBN, else the configured board
     (:func:`toolchain.configured_board`), else the configured FQBN. Matching is on a
     normalised token (hyphens/colons stripped) so ``esp32-s3-devkitc-1``,
-    ``esp32:esp32:esp32s3`` and ``esp32s3`` all resolve to ``esp32s3``.
+    ``esp32:esp32:esp32s3`` and ``esp32s3`` all resolve to ``esp32s3``; an STM32 Nucleo
+    (``STMicroelectronics:stm32:Nucleo_64`` → pio ``nucleo_f401re``) resolves to
+    ``stm32f4``.
     """
     candidates = [board or ""]
     try:
@@ -74,8 +122,10 @@ def detect_chip(board: Optional[str] = None) -> str:
         candidates.append(config.get_default_device().get("fqbn") or "")
     except Exception:
         pass
-    for raw in candidates:
-        norm = raw.lower().replace("-", "").replace(":", "").replace("_", "")
+    norms = [_norm(c) for c in candidates]
+    if any(tok in n for n in norms for tok in ("stm32", "nucleo", "bluepill")):
+        return "stm32" + _stm32_family(candidates)
+    for norm in norms:
         for token in _CHIP_TOKENS:
             if token in norm:
                 return token
@@ -90,30 +140,53 @@ def _platformio_packages() -> Path:
     return Path.home() / ".platformio" / "packages"
 
 
-def find_openocd() -> Optional[str]:
-    """Path to an OpenOCD binary: PlatformIO's ``tool-openocd-esp32`` then ``PATH``."""
+def find_openocd(chip: Optional[str] = None) -> Optional[str]:
+    """Path to an OpenOCD binary from PlatformIO's package cache, then ``PATH``.
+
+    STM32/ARM targets use the generic ``tool-openocd`` package; ESP32 targets use the
+    Espressif ``tool-openocd-esp32`` build. Either package falls back to the other and
+    then to a system ``openocd`` on ``PATH``.
+    """
     override = (config.get_debug_config() or {}).get("openocd_path")
     if override and Path(override).exists():
         return override
     exe = "openocd.exe" if sys.platform == "win32" else "openocd"
-    candidate = _platformio_packages() / "tool-openocd-esp32" / "bin" / exe
-    if candidate.exists():
-        return str(candidate)
-    found = shutil.which("openocd")
-    return found
+    pkgs = _platformio_packages()
+    preferred = "tool-openocd" if (chip and _family(chip) == "arm") else "tool-openocd-esp32"
+    other = "tool-openocd-esp32" if preferred == "tool-openocd" else "tool-openocd"
+    for pkg in (preferred, other):
+        candidate = pkgs / pkg / "bin" / exe
+        if candidate.exists():
+            return str(candidate)
+    return shutil.which("openocd")
+
+
+def openocd_scripts_dir(openocd_path: str) -> Optional[Path]:
+    """The ``scripts`` dir bundled with a PlatformIO OpenOCD, so ``-f interface/…`` and
+    ``-f target/…`` resolve. Returns None for a system OpenOCD (it has its own path)."""
+    pkg = Path(openocd_path).parent.parent  # <pkg>/bin/openocd → <pkg>
+    for sub in (pkg / "openocd" / "scripts", pkg / "share" / "openocd" / "scripts"):
+        if sub.is_dir():
+            return sub
+    return None
 
 
 def find_gdb(chip: str) -> Optional[str]:
-    """Path to the GDB for ``chip``: PlatformIO's esp toolchain then ``PATH``.
+    """Path to the GDB for ``chip``: PlatformIO's toolchain then ``PATH``.
 
-    Xtensa parts (esp32/s2/s3) use ``xtensa-*-elf-gdb``; the RISC-V parts
-    (c3/c6/h2/…) use ``riscv32-esp-elf-gdb``. Newer toolchains unify the xtensa GDB to
-    ``xtensa-esp-elf-gdb``, so both the per-chip and the unified names are matched.
+    ARM/STM32 use ``arm-none-eabi-gdb`` (``toolchain-gccarmnoneeabi``); xtensa parts
+    (esp32/s2/s3) use ``xtensa-*-elf-gdb``; RISC-V parts (c3/c6/h2/…) use
+    ``riscv32-esp-elf-gdb``. Newer xtensa toolchains unify the GDB to
+    ``xtensa-esp-elf-gdb``, so the per-chip and unified names are both matched.
     """
     override = (config.get_debug_config() or {}).get("gdb_path")
     if override and Path(override).exists():
         return override
-    if chip in _RISCV_CHIPS:
+    fam = _family(chip)
+    if fam == "arm":
+        patterns = ["*arm-none-eabi-gdb*"]
+        path_names = ["arm-none-eabi-gdb"]
+    elif fam == "riscv":
         patterns = ["*riscv32-esp-elf-gdb*"]
         path_names = ["riscv32-esp-elf-gdb"]
     else:
@@ -124,8 +197,8 @@ def find_gdb(chip: str) -> Optional[str]:
         for pattern in patterns:
             hits = sorted(pkgs.glob(f"toolchain-*/bin/{pattern}"))
             # The glob also matches helper scripts that merely start with the gdb name
-            # (e.g. xtensa-esp32-elf-gdb-add-index, …-gdb-py) — keep only the binary
-            # whose name actually ends in "gdb".
+            # (e.g. arm-none-eabi-gdb-add-index, …-gdb-py3) — keep only the binary whose
+            # name actually ends in "gdb".
             for hit in hits:
                 if hit.is_file() and hit.stem.endswith("gdb"):
                     return str(hit)
@@ -139,16 +212,26 @@ def find_gdb(chip: str) -> Optional[str]:
 def openocd_config(chip: str, interface: Optional[str] = None) -> list[str]:
     """OpenOCD ``-f`` argument list for ``chip``.
 
-    With no ``interface`` and a built-in-JTAG chip, uses the single
-    ``board/<chip>-builtin.cfg``. An explicit ``interface`` (e.g. ``ftdi/esp32_devkitj_v1``
-    or ``esp_usb_bridge``) pairs an ``interface/*.cfg`` with the chip's ``target/*.cfg``
-    for external probes (and for classic esp32 / esp32s2, which have no built-in JTAG).
+    STM32/ARM: an ST-Link probe (``interface/stlink.cfg`` by default) paired with the
+    chip family's ``target/stm32<fam>x.cfg``. ESP32: with no ``interface`` and a
+    built-in-JTAG chip, the single ``board/<chip>-builtin.cfg``; an explicit
+    ``interface`` (e.g. ``ftdi/esp32_devkitj_v1``) pairs an ``interface/*.cfg`` with the
+    chip's ``target/*.cfg`` for external probes (and for classic esp32 / esp32s2).
     """
     override = (config.get_debug_config() or {}).get("openocd_config")
     if override:
         return ["-f", override]
     if interface is None:
         interface = (config.get_debug_config() or {}).get("interface") or None
+    if _family(chip) == "arm":
+        fam = chip[len("stm32"):]
+        target = _STM32_TARGETS.get(fam)
+        if not target:
+            raise DebugError(
+                f"unknown STM32 family for {chip!r} — set debug.openocd_config to the "
+                f"OpenOCD target cfg (e.g. 'target/stm32f4x.cfg')"
+            )
+        return ["-f", f"interface/{interface or 'stlink'}.cfg", "-f", f"target/{target}.cfg"]
     if interface:
         return ["-f", f"interface/{interface}.cfg", "-f", f"target/{chip}.cfg"]
     if chip in _BUILTIN_JTAG:
@@ -274,9 +357,9 @@ def _console_text(responses: list) -> str:
 # ---------------------------------------------------------------------------
 
 class DebugSession:
-    """A live OpenOCD + GDB session against one ESP32 target."""
+    """A live OpenOCD + GDB session against one ESP32 or STM32 target."""
 
-    def __init__(self, chip: str, elf: Path, openocd: str, gdb: str, cfg_args: list[str]):
+    def __init__(self, chip: str, elf: Optional[Path], openocd: str, gdb: str, cfg_args: list[str]):
         self.chip = chip
         self.elf = elf
         self.openocd_path = openocd
@@ -292,7 +375,11 @@ class DebugSession:
         try:
             _wait_for_gdb_server(self._openocd, time.monotonic() + _OPENOCD_STARTUP_TIMEOUT)
             self._gdb = _make_gdb_controller(self.gdb_path)
-            self._mi(f"-file-exec-and-symbols {self.elf.as_posix()!r}".replace("'", '"'))
+            # Symbols are optional: with no ELF we can still attach, halt, and read
+            # registers/memory/raw-GDB — only source-level views (variables, file:line
+            # breakpoints) need them.
+            if self.elf is not None:
+                self._mi(f"-file-exec-and-symbols {self.elf.as_posix()!r}".replace("'", '"'))
             self._mi(f"-target-select remote 127.0.0.1:{_GDB_PORT}")
             self._mi('-interpreter-exec console "monitor reset halt"')
             self.halted = True
@@ -332,7 +419,11 @@ class DebugSession:
 
     # -- introspection ------------------------------------------------------
     def session_info(self) -> dict:
-        info: dict = {"chip": self.chip, "elf": str(self.elf), "halted": self.halted}
+        info: dict = {
+            "chip": self.chip,
+            "elf": str(self.elf) if self.elf is not None else None,
+            "halted": self.halted,
+        }
         if self.halted:
             try:
                 frame = _result(self._mi("-stack-info-frame")).get("frame", {})
@@ -513,21 +604,33 @@ def start_session(
     if _SESSION is not None:
         _SESSION.stop()
         _SESSION = None
-    openocd = find_openocd()
+    chip = detect_chip(board or autodetect_board())
+    openocd = find_openocd(chip)
     if not openocd:
         raise DebugError(
             "OpenOCD not found — install it via PlatformIO "
-            "(`pio pkg install -g -t platformio/tool-openocd-esp32`) or put `openocd` on PATH"
+            "(`pio pkg install -g -t platformio/tool-openocd`) or put `openocd` on PATH"
         )
-    chip = detect_chip(board)
     gdb = find_gdb(chip)
     if not gdb:
+        toolchain_hint = "Espressif" if _family(chip) != "arm" else "Arm GNU (gccarmnoneeabi)"
         raise DebugError(
-            f"GDB for {chip} not found — install the Espressif toolchain via PlatformIO "
-            f"(build once for this board) or put the esp gdb on PATH"
+            f"GDB for {chip} not found — install the {toolchain_hint} toolchain via "
+            f"PlatformIO (build once for this board) or put the gdb on PATH"
         )
-    elf_path = resolve_elf(elf)
+    # Symbols are optional: an explicit elf= that is missing is an error, but with no
+    # build available we still attach (registers/memory/raw-GDB) without source views.
+    elf_path: Optional[Path]
+    try:
+        elf_path = resolve_elf(elf)
+    except DebugError:
+        if elf:
+            raise
+        elf_path = None
     cfg_args = openocd_config(chip, interface)
+    scripts = openocd_scripts_dir(openocd)
+    if scripts is not None:
+        cfg_args = ["-s", str(scripts)] + cfg_args
     session = DebugSession(chip, elf_path, openocd, gdb, cfg_args)
     info = session.start()
     _SESSION = session

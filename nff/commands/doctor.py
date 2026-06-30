@@ -139,8 +139,8 @@ def check_debug_tools() -> Check:
     Only meaningful for the `nff debug` / debug_* MCP tools; never flips the exit code.
     """
     from nff.tools import debug as debug_module
-    openocd = debug_module.find_openocd()
     chip = debug_module.detect_chip()
+    openocd = debug_module.find_openocd(chip)
     gdb = debug_module.find_gdb(chip)
     if openocd and gdb:
         return Check(passed=True, detail=f"OpenOCD + {chip} GDB found")

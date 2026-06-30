@@ -38,8 +38,8 @@ def debug(ctx, elf, board, interface):
 @click.option("--board", default=None, help="Board id/FQBN to derive the chip family")
 def check(board):
     """Report the OpenOCD/GDB binaries, chip, and ELF nff would use — no hardware needed."""
-    chip = debug_module.detect_chip(board)
-    openocd = debug_module.find_openocd()
+    chip = debug_module.detect_chip(board or debug_module.autodetect_board())
+    openocd = debug_module.find_openocd(chip)
     gdb = debug_module.find_gdb(chip)
     try:
         elf = str(debug_module.resolve_elf())

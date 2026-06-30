@@ -186,11 +186,14 @@ ledcWrite(SERVO_PIN, 4915);             // move to center
 4. Compilation error → read the `error:` lines from `nff compile`, fix `.ino`, re-run `nff compile`
 5. Serial output garbled or empty → baud mismatch: match `Serial.begin(N)` ↔ `nff monitor --baud N` ↔ `~/.nff/config.json`
 
-### Live on-chip debugging (JTAG)
+### Live on-chip debugging (JTAG/SWD)
 
-For ESP32-S3/C3/C6 (built-in USB-JTAG) you can pause a running device and inspect it at the
-source level — like a real debugger, not just serial prints. This drives OpenOCD + GDB; the
-binaries come from the PlatformIO toolchain (compile once for the board first).
+Pause a running device and inspect it at the source level — like a real debugger, not just
+serial prints. Supported targets: **ESP32-S3/C3/C6** (built-in USB-JTAG) and **STM32** via an
+ST-Link probe (e.g. on-board on a Nucleo/Discovery). This drives OpenOCD + GDB; the binaries
+come from the PlatformIO toolchain (`tool-openocd`/`tool-openocd-esp32` + the Arm/Espressif GDB),
+so compile once for the board first (or just have the toolchain installed). The target board is
+auto-detected from USB, so `nff debug` works on a plugged-in board even before `nff init`.
 
 MCP tools (and the matching `nff debug` REPL commands):
 
@@ -205,9 +208,11 @@ MCP tools (and the matching `nff debug` REPL commands):
 **Workflow:** `nff compile <sketch>` → `nff flash <sketch>` → `debug_start` → the target halts;
 then read registers/variables/stack, set a breakpoint, `continue_execution`, and inspect again.
 **Most tools require a halted target** — call `pause_execution` (or hit a breakpoint) first.
-Classic ESP32 / ESP32-S2 have no built-in JTAG: connect an external probe and pass
-`interface=` (e.g. `ftdi/esp32_devkitj_v1`). `nff debug check` reports the detected
-chip/OpenOCD/GDB/ELF without touching hardware.
+Symbols are optional — with no ELF you can still attach and read registers/memory/raw-GDB; only
+source-level views (variables, `file:line` breakpoints) need a build. Classic ESP32 / ESP32-S2
+have no built-in JTAG: connect an external probe and pass `interface=` (e.g.
+`ftdi/esp32_devkitj_v1`). `nff debug check` reports the detected chip/OpenOCD/GDB/ELF without
+touching hardware.
 
 ---
 
