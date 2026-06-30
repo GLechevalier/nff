@@ -133,6 +133,27 @@ def check_lib_sync() -> Check:
     return Check(passed=True, detail=detail)
 
 
+def check_debug_tools() -> Check:
+    """Optional: are the on-chip debug tools (OpenOCD + an esp GDB) available?
+
+    Only meaningful for the `nff debug` / debug_* MCP tools; never flips the exit code.
+    """
+    from nff.tools import debug as debug_module
+    openocd = debug_module.find_openocd()
+    chip = debug_module.detect_chip()
+    gdb = debug_module.find_gdb(chip)
+    if openocd and gdb:
+        return Check(passed=True, detail=f"OpenOCD + {chip} GDB found")
+    missing = ", ".join(n for n, v in (("OpenOCD", openocd), ("GDB", gdb)) if not v)
+    return Check(
+        passed=False,
+        detail=f"{missing} not found (on-chip debugging unavailable)",
+        fix="Install via PlatformIO: `pio pkg install -g -t platformio/tool-openocd-esp32` "
+            "(GDB comes with the espressif toolchain — build once for your board)",
+        optional=True,
+    )
+
+
 def check_login() -> Check:
     """Signed in to the nff platform? The MCP tools are gated behind this token."""
     token = config.get_diagnosis_config().get("access_token")
@@ -182,6 +203,7 @@ def doctor():
         checks.append(("nff lib", check_lib_sync()))
     checks += [
         ("Device", check_device()),
+        ("Debug tools", check_debug_tools()),
         ("Login", check_login()),
         ("MCP server", check_mcp_server()),
         ("Claude Desktop", check_claude_desktop()),

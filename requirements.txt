@@ -12,6 +12,7 @@ markdown-it-py==4.0.0
 mdurl==0.1.2
 pip==26.0.1
 pycparser==3.0
+pygdbmi>=0.11
 Pygments==2.20.0
 pyserial==3.5
 PyYAML==6.0.3

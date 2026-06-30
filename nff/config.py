@@ -32,6 +32,11 @@ _DEFAULT = {
     # default_device.fqbn. The active backend can also be overridden per-run with the
     # NFF_BUILD_BACKEND env var.
     "build": {"backend": "platformio", "board": None},
+    # On-chip debugging (`nff debug` / the debug_* MCP tools). All keys are optional
+    # overrides — when empty, nff auto-detects: openocd_path/gdb_path from PlatformIO's
+    # package cache (else PATH), openocd_config from the chip's built-in-JTAG board file,
+    # and interface for an external JTAG probe (classic esp32 / esp32s2 need this).
+    "debug": {"openocd_path": None, "gdb_path": None, "openocd_config": None, "interface": None},
 }
 
 
@@ -210,3 +215,14 @@ def set_build_board(board) -> None:
     data.setdefault("build", copy.deepcopy(_DEFAULT["build"]))
     data["build"]["board"] = board
     save(data)
+
+
+def get_debug_config() -> dict:
+    """On-chip debug config, merged over defaults so older config files (written before
+    this section existed) still return every key — all optional overrides."""
+    try:
+        cfg = copy.deepcopy(_DEFAULT["debug"])
+        cfg.update(load().get("debug", {}))
+        return cfg
+    except ConfigError:
+        return copy.deepcopy(_DEFAULT["debug"])

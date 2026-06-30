@@ -19,6 +19,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 import nff.tools.arduino_lib as arduino_lib
 import nff.tools.boards as boards_module
+import nff.tools.debug as debug_module
 import nff.tools.serial as serial_module
 import nff.tools.toolchain as toolchain
 from nff import config
@@ -392,6 +393,88 @@ async def repair(
 
 
 # ---------------------------------------------------------------------------
+# Live on-chip debug handlers (OpenOCD + GDB/MI). Most require a halted target;
+# the underlying DebugSession raises DebugError, surfaced here as "ERROR: ...".
+# ---------------------------------------------------------------------------
+
+
+def _debug_call(fn, *args, **kwargs):
+    """Run a debug.* operation, mapping DebugError (and anything else) to ERROR:."""
+    try:
+        return fn(*args, **kwargs)
+    except debug_module.DebugError as exc:
+        return f"ERROR: {exc}"
+    except Exception as exc:  # pragma: no cover - defensive; gdb/openocd surprises
+        return f"ERROR: {exc}"
+
+
+async def debug_start(
+    elf: Optional[str] = None,
+    board: Optional[str] = None,
+    interface: Optional[str] = None,
+) -> Any:
+    return _debug_call(debug_module.start_session, elf, board, interface)
+
+
+async def debug_stop() -> str:
+    stopped = _debug_call(debug_module.stop_session)
+    if isinstance(stopped, str):
+        return stopped
+    return "OK: debug session stopped" if stopped else "OK: no active debug session"
+
+
+async def get_session_info() -> Any:
+    session = debug_module.get_session()
+    if session is None:
+        return {"halted": False, "active": False}
+    return _debug_call(session.session_info)
+
+
+async def get_call_stack() -> Any:
+    return _debug_call(lambda: debug_module.require_session().call_stack())
+
+
+async def get_variables(frame: int = 0) -> Any:
+    return _debug_call(lambda: debug_module.require_session().variables(frame))
+
+
+async def expand_variable(expression: str) -> Any:
+    return _debug_call(lambda: debug_module.require_session().expand_variable(expression))
+
+
+async def get_registers() -> Any:
+    return _debug_call(lambda: debug_module.require_session().registers())
+
+
+async def get_memory(address: str, count: int = 64) -> Any:
+    return _debug_call(lambda: debug_module.require_session().memory(address, count))
+
+
+async def evaluate(expression: str) -> Any:
+    return _debug_call(lambda: debug_module.require_session().evaluate(expression))
+
+
+async def set_breakpoint(location: str) -> Any:
+    return _debug_call(lambda: debug_module.require_session().set_breakpoint(location))
+
+
+async def pause_execution() -> Any:
+    return _debug_call(lambda: debug_module.require_session().pause())
+
+
+async def continue_execution() -> Any:
+    return _debug_call(lambda: debug_module.require_session().cont())
+
+
+async def step(kind: str = "over") -> Any:
+    return _debug_call(lambda: debug_module.require_session().step(kind))
+
+
+async def gdb_command(command: str) -> Any:
+    return _debug_call(lambda: debug_module.require_session().gdb_command(command))
+
+
+# ---------------------------------------------------------------------------
 # MCP server wiring
 # ---------------------------------------------------------------------------
 
@@ -461,6 +544,62 @@ _TOOLS = [
              "serial_output": {"type": "string"}, "build_id": {"type": "string"},
              "board": {"type": "string"}},
              "required": ["serial_output"]}),
+    # --- live on-chip debugging (OpenOCD + GDB over JTAG) ---
+    Tool(name="debug_start",
+         description="Start a live on-chip debug session: launch OpenOCD + GDB over JTAG, "
+                     "load the last build's firmware.elf for symbols, and reset+halt the "
+                     "target. Defaults work for an ESP32-S3/C3/C6 (built-in USB-JTAG). Pass "
+                     "elf= for a specific ELF, board= to pick the chip, interface= for an "
+                     "external JTAG probe. Returns session info (chip, halt state, current frame).",
+         inputSchema={"type": "object", "properties": {
+             "elf": {"type": "string", "description": "Path to a built .elf (defaults to the last build)"},
+             "board": {"type": "string", "description": "Board id/FQBN to derive the chip family"},
+             "interface": {"type": "string", "description": "OpenOCD interface cfg for an external probe, e.g. ftdi/esp32_devkitj_v1"}}}),
+    Tool(name="debug_stop", description="Stop the live debug session and shut down OpenOCD + GDB",
+         inputSchema={"type": "object", "properties": {}}),
+    Tool(name="get_session_info",
+         description="Report whether a debug session is active, the chip, halt state, and the current frame",
+         inputSchema={"type": "object", "properties": {}}),
+    Tool(name="get_call_stack",
+         description="Current call stack with function, file, and line for each frame (target must be halted)",
+         inputSchema={"type": "object", "properties": {}}),
+    Tool(name="get_variables",
+         description="Local variables and arguments in a frame (default frame 0). Target must be halted.",
+         inputSchema={"type": "object", "properties": {
+             "frame": {"type": "integer", "default": 0}}}),
+    Tool(name="expand_variable",
+         description="Expand a struct/array/pointer expression into its children (target must be halted)",
+         inputSchema={"type": "object", "properties": {
+             "expression": {"type": "string"}}, "required": ["expression"]}),
+    Tool(name="get_registers",
+         description="Read the core CPU registers (target must be halted). Returns name → hex value.",
+         inputSchema={"type": "object", "properties": {}}),
+    Tool(name="get_memory",
+         description="Read raw memory as a hex dump. address is a hex string or expression; count is bytes (default 64). Target must be halted.",
+         inputSchema={"type": "object", "properties": {
+             "address": {"type": "string"}, "count": {"type": "integer", "default": 64}},
+             "required": ["address"]}),
+    Tool(name="evaluate",
+         description="Evaluate a C/C++ expression in the current frame (GDB syntax). Target must be halted.",
+         inputSchema={"type": "object", "properties": {
+             "expression": {"type": "string"}}, "required": ["expression"]}),
+    Tool(name="set_breakpoint",
+         description="Set a breakpoint at a source location (file:line) or function name",
+         inputSchema={"type": "object", "properties": {
+             "location": {"type": "string"}}, "required": ["location"]}),
+    Tool(name="pause_execution", description="Halt the running target",
+         inputSchema={"type": "object", "properties": {}}),
+    Tool(name="continue_execution", description="Resume the halted target",
+         inputSchema={"type": "object", "properties": {}}),
+    Tool(name="step",
+         description="Step the halted target: kind = over (next line) | into (step in) | out (finish frame)",
+         inputSchema={"type": "object", "properties": {
+             "kind": {"type": "string", "enum": ["over", "into", "out"], "default": "over"}}}),
+    Tool(name="gdb_command",
+         description="Run a raw GDB command (escape hatch). MI commands (starting with '-') return "
+                     "structured results; plain console commands return text output.",
+         inputSchema={"type": "object", "properties": {
+             "command": {"type": "string"}}, "required": ["command"]}),
 ]
 
 _DISPATCH = {
@@ -478,6 +617,20 @@ _DISPATCH = {
     "auth_clear": auth_clear,
     "auth_reconnect": auth_reconnect,
     "repair": repair,
+    "debug_start": debug_start,
+    "debug_stop": debug_stop,
+    "get_session_info": get_session_info,
+    "get_call_stack": get_call_stack,
+    "get_variables": get_variables,
+    "expand_variable": expand_variable,
+    "get_registers": get_registers,
+    "get_memory": get_memory,
+    "evaluate": evaluate,
+    "set_breakpoint": set_breakpoint,
+    "pause_execution": pause_execution,
+    "continue_execution": continue_execution,
+    "step": step,
+    "gdb_command": gdb_command,
 }
 
 # In-memory OAuth handshake state. These dicts only hold a request mid-flight (the
