@@ -88,6 +88,13 @@ def base_url(mcp_url: str) -> str:
     return mcp_url[: -len("/mcp")]
 
 
+@pytest.fixture(autouse=True)
+def _gate_off_by_default(monkeypatch):
+    """nff ships ungated. Clear any stray NFF_MCP_REQUIRE_AUTH so the suite's default
+    matches shipped behavior (gate OFF); tests that need the gate set it explicitly."""
+    monkeypatch.delenv("NFF_MCP_REQUIRE_AUTH", raising=False)
+
+
 # ===========================================================================
 # UNIT TESTS — resolver helpers (no transport)
 # ===========================================================================
@@ -287,16 +294,25 @@ _ALL_TOOL_NAMES = {
 # Bearer auth gate — HTTP transport level
 # ---------------------------------------------------------------------------
 
-async def test_mcp_transport_returns_401_without_token(base_url):
-    """POST to /mcp without Authorization header returns 401 when no token stored."""
+async def test_mcp_transport_returns_401_without_token(base_url, monkeypatch):
+    """With NFF_MCP_REQUIRE_AUTH on, POST to /mcp without a token returns 401."""
+    monkeypatch.setenv("NFF_MCP_REQUIRE_AUTH", "1")
     async with httpx.AsyncClient() as client:
         resp = await client.post(f"{base_url}/mcp", content=b"{}")
     assert resp.status_code == 401
     assert "www-authenticate" in resp.headers
 
 
-async def test_mcp_transport_returns_401_with_wrong_token(base_url):
-    """POST to /mcp with wrong Bearer token returns 401."""
+async def test_mcp_transport_open_without_auth_by_default(base_url):
+    """Gate is OFF by default: an unauthenticated /mcp POST is NOT rejected with 401."""
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(f"{base_url}/mcp", content=b"{}")
+    assert resp.status_code != 401
+
+
+async def test_mcp_transport_returns_401_with_wrong_token(base_url, monkeypatch):
+    """With NFF_MCP_REQUIRE_AUTH on, POST to /mcp with a wrong token returns 401."""
+    monkeypatch.setenv("NFF_MCP_REQUIRE_AUTH", "1")
     async with httpx.AsyncClient() as client:
         resp = await client.post(
             f"{base_url}/mcp",

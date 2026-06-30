@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import os
 import secrets
 from collections.abc import AsyncIterator
 from typing import Any, Optional
@@ -25,6 +26,16 @@ from nff import config
 # ---------------------------------------------------------------------------
 # Resolver helpers (tested directly)
 # ---------------------------------------------------------------------------
+
+
+def _auth_required() -> bool:
+    """True only when `NFF_MCP_REQUIRE_AUTH` (1/true/yes/on) opts into the /mcp Bearer gate.
+
+    Default (unset) leaves the gate OFF — nff ships ungated for the single-user,
+    localhost-only bench, so there is no "needs authentication" handshake unless you
+    explicitly ask for one.
+    """
+    return os.environ.get("NFF_MCP_REQUIRE_AUTH", "").strip().lower() in ("1", "true", "yes", "on")
 
 
 def _resolve_port(port: Optional[str]) -> str:
@@ -553,17 +564,21 @@ class _NffASGI:
             elif path.startswith("/.well-known/") or path.startswith("/oauth/"):
                 await self._handle_oauth_route(path, scope, receive, send)
             elif path == "/mcp" or path.startswith("/mcp/"):
-                headers_dict = dict(scope.get("headers", []))
-                auth = headers_dict.get(b"authorization", b"").decode()
-                presented = auth[len("Bearer "):] if auth.startswith("Bearer ") else ""
-                mcp_token = config.get_mcp_tokens().get("access_token")
-                # Legacy: sessions authorized before opaque tokens existed still hold
-                # the raw Supabase JWT. Accept it once so the live session isn't broken;
-                # Claude re-authorizes on its next expiry and upgrades to an MCP token.
-                legacy_token = config.get_diagnosis_config().get("access_token")
-                if not presented or presented not in (mcp_token, legacy_token):
-                    await self._send_401(send)
-                    return
+                # The /mcp Bearer gate is OFF by default (single-user, localhost-only
+                # bench). Set `NFF_MCP_REQUIRE_AUTH` (1/true/yes/on) to opt into the
+                # "needs authentication" handshake.
+                if _auth_required():
+                    headers_dict = dict(scope.get("headers", []))
+                    auth = headers_dict.get(b"authorization", b"").decode()
+                    presented = auth[len("Bearer "):] if auth.startswith("Bearer ") else ""
+                    mcp_token = config.get_mcp_tokens().get("access_token")
+                    # Legacy: sessions authorized before opaque tokens existed still hold
+                    # the raw Supabase JWT. Accept it once so the live session isn't broken;
+                    # Claude re-authorizes on its next expiry and upgrades to an MCP token.
+                    legacy_token = config.get_diagnosis_config().get("access_token")
+                    if not presented or presented not in (mcp_token, legacy_token):
+                        await self._send_401(send)
+                        return
                 await self._sm.handle_request(scope, receive, send)
             else:
                 await self._send_404(send)

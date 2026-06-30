@@ -52,20 +52,36 @@ struct Server {
 }
 
 impl Server {
+    /// Default server — the `/mcp` Bearer gate is OFF (nff ships ungated).
     fn start() -> Server {
+        Server::start_inner(false)
+    }
+
+    /// Server with the Bearer gate enforced via `NFF_MCP_REQUIRE_AUTH=1`. The env var is
+    /// set only on this child process, so it can't leak into other (parallel) tests.
+    fn start_with_auth() -> Server {
+        Server::start_inner(true)
+    }
+
+    fn start_inner(require_auth: bool) -> Server {
         let port = free_port();
         let base = format!("http://127.0.0.1:{port}");
-        let child = Command::new(nff())
-            .arg("mcp")
+        let mut cmd = Command::new(nff());
+        cmd.arg("mcp")
             .arg("--host")
             .arg("127.0.0.1")
             .arg("--port")
             .arg(port.to_string())
             .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("failed to spawn nff mcp");
+            .stderr(Stdio::null());
+        if require_auth {
+            cmd.env("NFF_MCP_REQUIRE_AUTH", "1");
+        } else {
+            // Make the child immune to a require-auth value inherited from the caller's env.
+            cmd.env_remove("NFF_MCP_REQUIRE_AUTH");
+        }
+        let child = cmd.spawn().expect("failed to spawn nff mcp");
         let server = Server { child, base };
         server.wait_until_ready();
         server
@@ -169,8 +185,28 @@ fn oauth_register_returns_static_client() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn mcp_requires_bearer_auth() {
+fn mcp_open_by_default() {
+    // With no NFF_MCP_REQUIRE_AUTH, the gate is off: an unauthenticated initialize
+    // must NOT be rejected with 401 (it reaches the MCP handler instead).
     let server = Server::start();
+    let resp = client()
+        .post(server.url("/mcp"))
+        .header("content-type", "application/json")
+        .header("accept", "application/json, text/event-stream")
+        .body(INIT_BODY)
+        .send()
+        .expect("request failed");
+    assert_ne!(
+        resp.status().as_u16(),
+        401,
+        "gate is off by default — unauthenticated /mcp must not be rejected, got {}",
+        resp.status()
+    );
+}
+
+#[test]
+fn mcp_requires_bearer_auth() {
+    let server = Server::start_with_auth();
     let resp = client()
         .post(server.url("/mcp"))
         .header("content-type", "application/json")
@@ -196,7 +232,7 @@ fn mcp_requires_bearer_auth() {
 
 #[test]
 fn mcp_rejects_unknown_bearer_token() {
-    let server = Server::start();
+    let server = Server::start_with_auth();
     let resp = client()
         .post(server.url("/mcp"))
         .header("content-type", "application/json")

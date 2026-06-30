@@ -245,13 +245,27 @@ fn parse_query(q: &Option<String>) -> HashMap<String, String> {
     map
 }
 
+/// True only when the operator has explicitly opted **into** the `/mcp` Bearer gate
+/// via the `NFF_MCP_REQUIRE_AUTH` env var (accepts `1`/`true`/`yes`/`on`, case-insensitive).
+/// Default (unset) leaves the gate OFF — nff ships ungated for the single-user, localhost-only
+/// bench model; enabling auth is the deliberate, opt-in act.
+fn auth_required() -> bool {
+    std::env::var("NFF_MCP_REQUIRE_AUTH")
+        .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+        .unwrap_or(false)
+}
+
 /// Bearer guard on `/mcp`: accept the opaque MCP access token OR (legacy) the raw
 /// diagnosis JWT, so sessions authorized before opaque tokens existed keep working.
+/// Open by default; only enforced when `NFF_MCP_REQUIRE_AUTH` is set (see `auth_required`).
 async fn bearer_auth(
     State(oauth): State<Arc<OAuthState>>,
     request: axum::extract::Request,
     next: Next,
 ) -> Response {
+    if !auth_required() {
+        return next.run(request).await;
+    }
     let presented = request
         .headers()
         .get(header::AUTHORIZATION)
@@ -844,11 +858,14 @@ impl ServerHandler for NffServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::new("nff", env!("CARGO_PKG_VERSION")))
-            .with_instructions(
-                "nff MCP server — all tools require HTTP Bearer authentication. \
-                Use `nff auth login` to obtain a token, then pass it as \
-                Authorization: Bearer <token> on every request.",
-            )
+            .with_instructions(if auth_required() {
+                "nff MCP server — the /mcp endpoint requires HTTP Bearer authentication \
+                (NFF_MCP_REQUIRE_AUTH is set). Use `nff auth login` to obtain a token, then \
+                pass it as Authorization: Bearer <token> on every request."
+            } else {
+                "nff MCP server — local bench tools, open by default (no authentication). \
+                Set NFF_MCP_REQUIRE_AUTH=1 to require an HTTP Bearer token on /mcp."
+            })
     }
 }
 
