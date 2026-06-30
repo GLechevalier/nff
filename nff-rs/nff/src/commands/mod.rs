@@ -3,6 +3,7 @@ pub mod auth;
 pub mod clean;
 pub mod compile;
 pub mod connect;
+pub mod debug;
 pub mod doctor;
 pub mod flash;
 pub mod init;

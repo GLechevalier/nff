@@ -97,6 +97,33 @@ def test_detect_chip_uses_configured_board(monkeypatch):
     assert dbg.detect_chip() == "esp32c6"
 
 
+@pytest.mark.parametrize("board,expected", [
+    ("nucleo_f401re", "stm32f4"),
+    ("STMicroelectronics:stm32:Nucleo_64", "stm32"),
+    ("genericSTM32F103C8", "stm32f1"),
+    ("bluepill_f103c8", "stm32f1"),
+])
+def test_detect_chip_stm32(board, expected, monkeypatch):
+    monkeypatch.setattr(dbg.toolchain, "configured_board", lambda: "")
+    monkeypatch.setattr(dbg.config, "get_default_device", lambda: {})
+    assert dbg.detect_chip(board) == expected
+
+
+def test_detect_chip_stm32_from_fqbn_plus_pio_board(monkeypatch):
+    # Real Nucleo case: fqbn says stm32, configured pio board carries the F4 family.
+    monkeypatch.setattr(dbg.toolchain, "configured_board", lambda: "nucleo_f401re")
+    monkeypatch.setattr(dbg.config, "get_default_device",
+                        lambda: {"fqbn": "STMicroelectronics:stm32:Nucleo_64"})
+    assert dbg.detect_chip() == "stm32f4"
+
+
+def test_family():
+    assert dbg._family("stm32f4") == "arm"
+    assert dbg._family("esp32c3") == "riscv"
+    assert dbg._family("esp32s3") == "xtensa"
+    assert dbg._family("esp32") == "xtensa"
+
+
 # ---------------------------------------------------------------------------
 # Binary / config discovery
 # ---------------------------------------------------------------------------
@@ -168,6 +195,56 @@ def test_openocd_config_classic_esp32_needs_interface():
     with pytest.raises(dbg.DebugError) as exc:
         dbg.openocd_config("esp32")
     assert "no built-in USB-JTAG" in str(exc.value)
+
+
+def test_openocd_config_stm32_stlink():
+    assert dbg.openocd_config("stm32f4") == [
+        "-f", "interface/stlink.cfg", "-f", "target/stm32f4x.cfg",
+    ]
+    assert dbg.openocd_config("stm32f1") == [
+        "-f", "interface/stlink.cfg", "-f", "target/stm32f1x.cfg",
+    ]
+
+
+def test_openocd_config_stm32_unknown_family():
+    with pytest.raises(dbg.DebugError) as exc:
+        dbg.openocd_config("stm32")
+    assert "unknown STM32 family" in str(exc.value)
+
+
+def test_find_gdb_arm(tmp_path, monkeypatch):
+    pkgs = tmp_path / "packages"
+    bindir = pkgs / "toolchain-gccarmnoneeabi" / "bin"
+    bindir.mkdir(parents=True)
+    (bindir / "arm-none-eabi-gdb-add-index").write_text("x")
+    (bindir / "arm-none-eabi-gdb-py3").write_text("x")
+    real = bindir / "arm-none-eabi-gdb"
+    real.write_text("x")
+    monkeypatch.setattr(dbg, "_platformio_packages", lambda: pkgs)
+    assert dbg.find_gdb("stm32f4") == str(real)
+
+
+def test_find_openocd_arm_prefers_generic(tmp_path, monkeypatch):
+    pkgs = tmp_path / "packages"
+    exe = "openocd.exe" if dbg.sys.platform == "win32" else "openocd"
+    generic = pkgs / "tool-openocd" / "bin" / exe
+    generic.parent.mkdir(parents=True)
+    generic.write_text("x")
+    esp = pkgs / "tool-openocd-esp32" / "bin" / exe
+    esp.parent.mkdir(parents=True)
+    esp.write_text("x")
+    monkeypatch.setattr(dbg, "_platformio_packages", lambda: pkgs)
+    assert dbg.find_openocd("stm32f4") == str(generic)
+    assert dbg.find_openocd("esp32s3") == str(esp)
+
+
+def test_openocd_scripts_dir(tmp_path):
+    ocd = tmp_path / "tool-openocd" / "bin" / "openocd.exe"
+    ocd.parent.mkdir(parents=True)
+    ocd.write_text("x")
+    scripts = tmp_path / "tool-openocd" / "openocd" / "scripts"
+    scripts.mkdir(parents=True)
+    assert dbg.openocd_scripts_dir(str(ocd)) == scripts
 
 
 # ---------------------------------------------------------------------------
@@ -359,7 +436,7 @@ def test_introspection_requires_halt():
 # ---------------------------------------------------------------------------
 
 def _stub_start(monkeypatch):
-    monkeypatch.setattr(dbg, "find_openocd", lambda: "openocd")
+    monkeypatch.setattr(dbg, "find_openocd", lambda chip=None: "openocd")
     monkeypatch.setattr(dbg, "find_gdb", lambda chip: "gdb")
     monkeypatch.setattr(dbg, "resolve_elf", lambda elf=None: dbg.Path("firmware.elf"))
     monkeypatch.setattr(dbg, "_spawn_openocd", lambda o, c: object())
@@ -389,14 +466,14 @@ def test_start_session_replaces_previous(monkeypatch):
 
 
 def test_start_session_missing_openocd(monkeypatch):
-    monkeypatch.setattr(dbg, "find_openocd", lambda: None)
+    monkeypatch.setattr(dbg, "find_openocd", lambda chip=None: None)
     with pytest.raises(dbg.DebugError) as exc:
         dbg.start_session()
     assert "OpenOCD not found" in str(exc.value)
 
 
 def test_start_session_missing_gdb(monkeypatch):
-    monkeypatch.setattr(dbg, "find_openocd", lambda: "openocd")
+    monkeypatch.setattr(dbg, "find_openocd", lambda chip=None: "openocd")
     monkeypatch.setattr(dbg, "find_gdb", lambda chip: None)
     with pytest.raises(dbg.DebugError) as exc:
         dbg.start_session(board="esp32-s3-devkitc-1")
@@ -437,7 +514,7 @@ async def test_handler_debug_stop_no_session():
 
 async def test_handler_debug_start_missing_openocd(monkeypatch):
     from nff.mcp_server import debug_start
-    monkeypatch.setattr(dbg, "find_openocd", lambda: None)
+    monkeypatch.setattr(dbg, "find_openocd", lambda chip=None: None)
     out = await debug_start()
     assert isinstance(out, str) and out.startswith("ERROR:")
 

@@ -16,6 +16,10 @@ use serde_json::{json, Value};
 #[derive(Clone, Default)]
 pub struct NffServer {
     pending_auth: Arc<Mutex<Option<TcpListener>>>,
+    /// The live on-chip debug session, shared across MCP sessions (mirrors the Python
+    /// module singleton). `debug_start` fills it; `debug_stop` / a replacing start drains
+    /// it, and Drop kills OpenOCD + GDB.
+    debug_session: Arc<Mutex<Option<crate::tools::debug::DebugSession>>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -477,9 +481,93 @@ async fn oauth_token(Extension(oauth): Extension<Arc<OAuthState>>, body: String)
     )
 }
 
+// ── debug param types ───────────────────────────────────────────────────────
+
+#[derive(Deserialize, JsonSchema)]
+struct DebugStartParams {
+    /// Path to a built .elf (defaults to the last build; optional — attach without symbols).
+    elf: Option<String>,
+    /// Board id/FQBN to derive the chip family (defaults to the connected/configured board).
+    board: Option<String>,
+    /// OpenOCD interface cfg for an external JTAG probe, e.g. ftdi/esp32_devkitj_v1.
+    interface: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct GetVariablesParams {
+    /// Stack frame index (0 = innermost).
+    #[serde(default)]
+    frame: i64,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct ExpandVariableParams {
+    /// The struct/array/pointer expression to expand.
+    expression: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct GetMemoryParams {
+    /// Start address — a hex string (e.g. "0x3ffb0000") or an expression.
+    address: String,
+    /// Number of bytes to read.
+    #[serde(default = "default_64_i64")]
+    count: i64,
+}
+
+fn default_64_i64() -> i64 {
+    64
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct EvaluateParams {
+    /// A C/C++ expression to evaluate in the current frame (GDB syntax).
+    expression: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct SetBreakpointParams {
+    /// A source location (file:line) or function name.
+    location: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct StepParams {
+    /// over (next line) | into (step in) | out (finish frame).
+    #[serde(default = "default_over")]
+    kind: String,
+}
+
+fn default_over() -> String {
+    "over".into()
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct GdbCommandParams {
+    /// A raw GDB command (MI commands start with '-'; otherwise a console command).
+    command: String,
+}
+
 // ---------------------------------------------------------------------------
 // MCP server
 // ---------------------------------------------------------------------------
+
+/// Non-tool helpers (kept out of the `#[tool_router]` impl so the macro only sees tools).
+impl NffServer {
+    fn with_session<F>(&self, f: F) -> String
+    where
+        F: FnOnce(&mut crate::tools::debug::DebugSession) -> Result<Value, crate::tools::debug::DebugError>,
+    {
+        let mut guard = self.debug_session.lock().unwrap();
+        match guard.as_mut() {
+            Some(s) => match f(s) {
+                Ok(v) => v.to_string(),
+                Err(e) => format!("ERROR: {e}"),
+            },
+            None => "ERROR: no active debug session — call debug_start first".into(),
+        }
+    }
+}
 
 #[tool_router]
 impl NffServer {
@@ -786,6 +874,121 @@ impl NffServer {
         .unwrap_or_else(|_| "ERROR: repair thread panicked".into())
     }
 
+    // ── live on-chip debugging (OpenOCD + GDB over JTAG/SWD) ──────────────────
+
+    #[tool(
+        description = "Start a live on-chip debug session: launch OpenOCD + GDB over JTAG/SWD, load the last build's firmware.elf for symbols, and reset+halt the target. Works for ESP32-S3/C3/C6 (built-in USB-JTAG) and STM32 (ST-Link); the board is auto-detected from USB. Pass elf= for a specific ELF, board= to pick the chip, interface= for an external probe. Returns session info (chip, halt state, current frame)."
+    )]
+    fn debug_start(&self, Parameters(p): Parameters<DebugStartParams>) -> String {
+        let mut session = match crate::tools::debug::open_session(
+            p.elf.as_deref(),
+            p.board.as_deref(),
+            p.interface.as_deref(),
+        ) {
+            Ok(s) => s,
+            Err(e) => return format!("ERROR: {e}"),
+        };
+        let info = match session.session_info() {
+            Ok(v) => v,
+            Err(e) => return format!("ERROR: {e}"),
+        };
+        *self.debug_session.lock().unwrap() = Some(session);
+        info.to_string()
+    }
+
+    #[tool(description = "Stop the live debug session and shut down OpenOCD + GDB")]
+    fn debug_stop(&self) -> String {
+        if self.debug_session.lock().unwrap().take().is_some() {
+            "OK: debug session stopped".into()
+        } else {
+            "OK: no active debug session".into()
+        }
+    }
+
+    #[tool(
+        description = "Report whether a debug session is active, the chip, halt state, and the current frame"
+    )]
+    fn get_session_info(&self) -> String {
+        let mut guard = self.debug_session.lock().unwrap();
+        match guard.as_mut() {
+            Some(s) => match s.session_info() {
+                Ok(v) => v.to_string(),
+                Err(e) => format!("ERROR: {e}"),
+            },
+            None => json!({ "halted": false, "active": false }).to_string(),
+        }
+    }
+
+    #[tool(
+        description = "Current call stack with function, file, and line for each frame (target must be halted)"
+    )]
+    fn get_call_stack(&self) -> String {
+        self.with_session(|s| s.call_stack())
+    }
+
+    #[tool(
+        description = "Local variables and arguments in a frame (default frame 0). Target must be halted."
+    )]
+    fn get_variables(&self, Parameters(p): Parameters<GetVariablesParams>) -> String {
+        self.with_session(|s| s.variables(p.frame))
+    }
+
+    #[tool(
+        description = "Expand a struct/array/pointer expression into its children (target must be halted)"
+    )]
+    fn expand_variable(&self, Parameters(p): Parameters<ExpandVariableParams>) -> String {
+        self.with_session(|s| s.expand_variable(&p.expression))
+    }
+
+    #[tool(
+        description = "Read the core CPU registers (target must be halted). Returns name → hex value."
+    )]
+    fn get_registers(&self) -> String {
+        self.with_session(|s| s.registers())
+    }
+
+    #[tool(
+        description = "Read raw memory as a hex dump. address is a hex string or expression; count is bytes (default 64). Target must be halted."
+    )]
+    fn get_memory(&self, Parameters(p): Parameters<GetMemoryParams>) -> String {
+        self.with_session(|s| s.memory(&p.address, p.count))
+    }
+
+    #[tool(
+        description = "Evaluate a C/C++ expression in the current frame (GDB syntax). Target must be halted."
+    )]
+    fn evaluate(&self, Parameters(p): Parameters<EvaluateParams>) -> String {
+        self.with_session(|s| s.evaluate(&p.expression))
+    }
+
+    #[tool(description = "Set a breakpoint at a source location (file:line) or function name")]
+    fn set_breakpoint(&self, Parameters(p): Parameters<SetBreakpointParams>) -> String {
+        self.with_session(|s| s.set_breakpoint(&p.location))
+    }
+
+    #[tool(description = "Halt the running target")]
+    fn pause_execution(&self) -> String {
+        self.with_session(|s| s.pause())
+    }
+
+    #[tool(description = "Resume the halted target")]
+    fn continue_execution(&self) -> String {
+        self.with_session(|s| s.cont())
+    }
+
+    #[tool(
+        description = "Step the halted target: kind = over (next line) | into (step in) | out (finish frame)"
+    )]
+    fn step(&self, Parameters(p): Parameters<StepParams>) -> String {
+        self.with_session(|s| s.step(&p.kind))
+    }
+
+    #[tool(
+        description = "Run a raw GDB command (escape hatch). MI commands (starting with '-') return structured results; plain console commands return text output."
+    )]
+    fn gdb_command(&self, Parameters(p): Parameters<GdbCommandParams>) -> String {
+        self.with_session(|s| s.gdb_command(&p.command))
+    }
 }
 
 #[cfg(test)]
@@ -885,12 +1088,16 @@ pub async fn run(bind: &str) -> anyhow::Result<()> {
         auth_codes: Mutex::new(HashMap::new()),
     });
 
-    // Shared across all sessions so authenticate()/complete_authentication() agree.
+    // Shared across all sessions so authenticate()/complete_authentication() agree, and so
+    // a debug session opened via one MCP call is visible to the next (like the Python singleton).
     let pending_auth: Arc<Mutex<Option<TcpListener>>> = Arc::new(Mutex::new(None));
+    let debug_session: Arc<Mutex<Option<crate::tools::debug::DebugSession>>> =
+        Arc::new(Mutex::new(None));
     let service = StreamableHttpService::new(
         move || {
             Ok(NffServer {
                 pending_auth: pending_auth.clone(),
+                debug_session: debug_session.clone(),
             })
         },
         Arc::<LocalSessionManager>::default(),
