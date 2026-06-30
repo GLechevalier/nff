@@ -51,22 +51,24 @@ diagnosis tools carry their own token when they call the server.
 (default; override with `--host` / `--port`). All MCP messages — initialize, tools/list,
 tools/call — are HTTP POST requests to that path.
 
-### 3. Bearer authentication
+### 3. Bearer authentication (opt-in, OFF by default)
 
-Every request to `/mcp` is gated by the bearer check in `_NffASGI` (`nff/mcp_server.py`).
-It validates `Authorization: Bearer <token>` against the opaque MCP token
-(`config.mcp.access_token`) — or, for back-compat, the legacy `config.diagnosis.access_token`
-— in `~/.nff/config.json`. A missing or wrong token returns HTTP 401 and Claude surfaces an
-"Unauthorized" error for every tool call. (`/health` is the one unauthenticated route, used
-only for liveness probing.) This gate is the whole reason the server is HTTP, not stdio:
-stdio can't gate the tools.
+**The `/mcp` Bearer gate is OFF by default.** nff is a single-user, localhost-only bench tool,
+so out of the box `/mcp` is open: no token, no OAuth handshake, no "needs authentication". The
+server still binds to `127.0.0.1` only, so it is not network-reachable — but any local process
+can call the tools.
 
-**Disabling the gate (`NFF_MCP_NO_AUTH`):** set the env var `NFF_MCP_NO_AUTH=1` (also accepts
-`true`/`yes`/`on`) in the environment the server is launched from to bypass the Bearer check on
-`/mcp` entirely — no token, no OAuth handshake, no "needs authentication". Unset (the default)
-keeps the gate enforced. This is a single-knob, local-only opt-out for single-user benches; never
-set it on anything network-reachable, since it makes every tool callable without credentials.
-Implemented in both `bearer_auth` (Rust, `mcp_server.rs`) and `_NffASGI` (Python, `mcp_server.py`).
+**Requiring auth (`NFF_MCP_REQUIRE_AUTH`):** set `NFF_MCP_REQUIRE_AUTH=1` (also accepts
+`true`/`yes`/`on`) in the environment the server is launched from to turn the gate back ON. When
+set, every request to `/mcp` must carry `Authorization: Bearer <token>` validated against the
+opaque MCP token (`config.mcp.access_token`) — or, for back-compat, the legacy
+`config.diagnosis.access_token` — in `~/.nff/config.json`. A missing or wrong token then returns
+HTTP 401 and Claude surfaces an "Unauthorized" error, driving the OAuth browser login. (`/health`
+is always unauthenticated, used only for liveness probing.) Gating the tools is the reason the
+server is HTTP, not stdio: stdio can't gate them.
+
+Implemented in both `bearer_auth` (Rust, `mcp_server.rs`) and `_NffASGI` (Python, `mcp_server.py`);
+the server's advertised `instructions` string reflects whichever mode is active.
 
 **One-time bootstrap order:**
 

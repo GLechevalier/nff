@@ -28,13 +28,14 @@ from nff import config
 # ---------------------------------------------------------------------------
 
 
-def _auth_disabled() -> bool:
-    """True when `NFF_MCP_NO_AUTH` (1/true/yes/on) turns off the /mcp Bearer gate.
+def _auth_required() -> bool:
+    """True only when `NFF_MCP_REQUIRE_AUTH` (1/true/yes/on) opts into the /mcp Bearer gate.
 
-    Default (unset) keeps the gate enforced — disabling it is a deliberate,
-    local-only opt-out so the "needs authentication" handshake goes away.
+    Default (unset) leaves the gate OFF — nff ships ungated for the single-user,
+    localhost-only bench, so there is no "needs authentication" handshake unless you
+    explicitly ask for one.
     """
-    return os.environ.get("NFF_MCP_NO_AUTH", "").strip().lower() in ("1", "true", "yes", "on")
+    return os.environ.get("NFF_MCP_REQUIRE_AUTH", "").strip().lower() in ("1", "true", "yes", "on")
 
 
 def _resolve_port(port: Optional[str]) -> str:
@@ -563,10 +564,10 @@ class _NffASGI:
             elif path.startswith("/.well-known/") or path.startswith("/oauth/"):
                 await self._handle_oauth_route(path, scope, receive, send)
             elif path == "/mcp" or path.startswith("/mcp/"):
-                # `NFF_MCP_NO_AUTH` (1/true/yes/on) disables the Bearer gate entirely —
-                # one env-var knob for local, single-user setups that don't want the
-                # "needs authentication" handshake. Default keeps the gate enforced.
-                if not _auth_disabled():
+                # The /mcp Bearer gate is OFF by default (single-user, localhost-only
+                # bench). Set `NFF_MCP_REQUIRE_AUTH` (1/true/yes/on) to opt into the
+                # "needs authentication" handshake.
+                if _auth_required():
                     headers_dict = dict(scope.get("headers", []))
                     auth = headers_dict.get(b"authorization", b"").decode()
                     presented = auth[len("Bearer "):] if auth.startswith("Bearer ") else ""
