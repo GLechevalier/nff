@@ -49,7 +49,9 @@ def _build_command_path_index():
 
     def walk(cmd, path, ctx):
         index[id(cmd)] = path
-        if isinstance(cmd, click.MultiCommand):
+        # Duck-type the group interface (click.Group / MultiCommand) so this works
+        # across Click versions without tripping the Click 9 MultiCommand warning.
+        if hasattr(cmd, "list_commands") and hasattr(cmd, "get_command"):
             try:
                 names = cmd.list_commands(ctx)
             except Exception:  # pylint: disable=broad-except
@@ -62,9 +64,7 @@ def _build_command_path_index():
                 if sub is not None:
                     walk(sub, path + [name], ctx)
 
-    import click as _click
-
-    ctx = _click.Context(root, info_name="pio")
+    ctx = click.Context(root, info_name="pio")
     walk(root, [], ctx)
     return index
 
